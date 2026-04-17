@@ -3,18 +3,20 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mortgage Freedom Blueprint | Smith Manoeuvre Planner</title>
-    <!-- Corrected Tailwind CSS -->
+    <title>Mortgage Renewal 2026 | BC High-Earner Strategist</title>
+    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- React & ReactDOM -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <!-- PropTypes - Required by many Recharts builds -->
+    <script src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js"></script>
     <!-- Babel for JSX -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <!-- Recharts - Using a stable version for UMD -->
+    <!-- Recharts - Version 2.10.3 (Stable UMD) -->
     <script src="https://unpkg.com/recharts@2.10.3/umd/Recharts.js"></script>
-    <!-- Lucide Icons -->
-    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Lucide Icons - Using a version that definitely supports toSvg -->
+    <script src="https://unpkg.com/lucide@0.263.0"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
         body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
@@ -24,7 +26,6 @@
         .custom-scrollbar::-webkit-scrollbar { width: 6px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: #f1f5f9; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
-        .preset-btn:hover .icon-box { transform: scale(1.05); }
     </style>
 </head>
 <body>
@@ -32,38 +33,39 @@
 
     <script type="text/babel">
         const { useState, useMemo, useEffect } = React;
+        
+        // Destructure from window.Recharts safely
         const { 
-            AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Label, Legend
-        } = Recharts;
+            AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Label, Legend 
+        } = window.Recharts;
 
-        // Enhanced Icon Component
+        // Corrected Icon Component for Lucide UMD
         const Icon = ({ name, size = 20, className = "" }) => {
             const [iconHtml, setIconHtml] = useState("");
             useEffect(() => {
-                if (window.lucide) {
-                    const icon = window.lucide.icons[name];
-                    if (icon) {
-                        const svg = icon.toSvg({ size, class: className });
-                        setIconHtml(svg);
+                const renderIcon = () => {
+                    // Lucide UMD uses camelCase or kebab-case. 
+                    // We check if it's a function or object with toSvg
+                    if (window.lucide) {
+                        const icon = window.lucide.icons[name] || window.lucide.icons[name.charAt(0).toLowerCase() + name.slice(1)];
+                        if (icon && typeof icon.toSvg === 'function') {
+                            const svg = icon.toSvg({ size, class: className });
+                            setIconHtml(svg);
+                        }
                     }
-                }
+                };
+                renderIcon();
             }, [name, size, className]);
             return <span dangerouslySetInnerHTML={{ __html: iconHtml }} className="inline-flex items-center" />;
         };
 
         const App = () => {
-            // --- Presets Section ---
-            const presets = [
-                { id: 'fixed-a', name: '3.69% 3yr Fixed', rate: 3.69, heloc: 5.20, color: 'bg-blue-600' },
-                { id: 'fixed-c', name: '3.75% 3yr Fixed', rate: 3.75, heloc: 5.20, color: 'bg-indigo-600' },
-                { id: 'var-b', name: '3.50% Variable', rate: 3.50, heloc: 5.45, color: 'bg-orange-500' }
-            ];
-
-            // --- State: Planning Levers ---
+            // --- State: Specialized 2026 Baseline ---
             const [loanAmount, setLoanAmount] = useState(1286000); 
             const [initialLumpSum, setInitialLumpSum] = useState(135000); 
-            const [amortization, setAmortization] = useState(25);
             const [interestRate, setInterestRate] = useState(3.69);
+            const [isVariable, setIsVariable] = useState(false);
+            const [varSpread, setVarSpread] = useState(0.25); // Predicted annual hike
             const [taxRate, setTaxRate] = useState(53.5);
             const [investmentReturn, setInvestmentReturn] = useState(4.0); 
             const [helocRate, setHelocRate] = useState(5.20); 
@@ -74,10 +76,7 @@
             const [useAccelerator, setUseAccelerator] = useState(false);
             const [useSMDeductionRefund, setUseSMDeductionRefund] = useState(true);
 
-            const applyPreset = (p) => {
-                setInterestRate(p.rate);
-                setHelocRate(p.heloc);
-            };
+            const termYears = 3;
 
             // --- Calculation Engine ---
             const results = useMemo(() => {
@@ -87,19 +86,23 @@
                 let totalHelocInterestPaid = 0;
                 let helocInterestAccumulatedForYear = 0;
                 let data = [];
-                let breakevenMonth = null;
 
-                const monthlyRate = interestRate / 100 / 12;
                 const helocMonthlyRate = helocRate / 100 / 12;
-                const totalMonths = Math.max(1, amortization * 12);
-                
-                // Amortization formula for monthly payment
-                const monthlyMortgagePayment = (effectiveStartBalance * monthlyRate) / (1 - Math.pow(1 + monthlyRate, -totalMonths));
+                const amortizationMonths = 25 * 12;
+                const baseMonthlyRate = interestRate / 100 / 12;
+                const monthlyMortgagePayment = (effectiveStartBalance * baseMonthlyRate) / (1 - Math.pow(1 + baseMonthlyRate, -amortizationMonths));
 
-                data.push({ year: 0, balance: Math.round(effectiveStartBalance), portfolio: 0 });
+                // Initial point
+                data.push({ month: 0, balance: Math.round(effectiveStartBalance), portfolio: 0 });
 
-                for (let month = 1; month <= totalMonths; month++) {
-                    const interestMth = currentBalance * monthlyRate;
+                for (let month = 1; month <= termYears * 12; month++) {
+                    // Variable Rate Simulation logic
+                    let activeRate = interestRate;
+                    if (isVariable && month > 12) {
+                        activeRate += (Math.floor((month - 1) / 12) * varSpread);
+                    }
+                    const currentMonthlyRate = activeRate / 100 / 12;
+                    const interestMth = currentBalance * currentMonthlyRate;
                     const principalMth = Math.min(currentBalance, monthlyMortgagePayment - interestMth);
                     
                     currentBalance -= principalMth;
@@ -109,35 +112,26 @@
                     totalHelocInterestPaid += helocInterestMth;
                     helocInterestAccumulatedForYear += helocInterestMth;
 
-                    // Annual Events (Year End)
+                    // Annual Events
                     if (month % 12 === 0) {
                         addedToInvestments += annualRRSPContribution;
                         if (useAccelerator) {
-                            const accelAmount = Math.min(currentBalance, annualRefund);
-                            currentBalance -= accelAmount;
-                            addedToInvestments += accelAmount;
+                            currentBalance -= annualRefund;
+                            addedToInvestments += annualRefund;
                         }
                         if (useSMDeductionRefund) {
                             const taxSavings = helocInterestAccumulatedForYear * (taxRate / 100);
-                            const refundAmount = Math.min(currentBalance, taxSavings);
-                            currentBalance -= refundAmount;
-                            addedToInvestments += refundAmount;
+                            currentBalance -= taxSavings;
+                            addedToInvestments += taxSavings;
                         }
                         helocInterestAccumulatedForYear = 0;
                     }
 
-                    // Investment Growth (Monthly)
                     totalPortfolio = (totalPortfolio + addedToInvestments) * (1 + (investmentReturn / 100 / 12));
 
-                    // Check for Breakeven Year
-                    if (totalPortfolio >= currentBalance && breakevenMonth === null) {
-                        breakevenMonth = month;
-                    }
-
-                    // Record data yearly for plotting
-                    if (month % 12 === 0 || month === totalMonths) {
+                    if (month % 3 === 0) {
                         data.push({
-                            year: Math.floor(month / 12),
+                            month: month,
                             balance: Math.max(0, Math.round(currentBalance)),
                             portfolio: Math.round(totalPortfolio),
                         });
@@ -146,206 +140,168 @@
 
                 return {
                     data,
-                    breakevenYear: breakevenMonth ? (breakevenMonth / 12).toFixed(1) : "None",
+                    endingBalance: currentBalance,
+                    endingPortfolio: totalPortfolio,
                     monthlyMortgagePayment,
                     afterTaxBorrowingCost: helocRate * (1 - taxRate/100),
-                    totalHelocInterestPaid
+                    finalHelocInterestMth: totalPortfolio * helocMonthlyRate
                 };
-            }, [loanAmount, initialLumpSum, amortization, interestRate, helocRate, annualRRSPContribution, annualRefund, useAccelerator, useSMDeductionRefund, investmentReturn, taxRate]);
+            }, [loanAmount, initialLumpSum, interestRate, isVariable, varSpread, helocRate, annualRRSPContribution, annualRefund, useAccelerator, useSMDeductionRefund, investmentReturn, taxRate]);
 
             return (
                 <div className="min-h-screen bg-slate-50 p-4 md:p-8 text-slate-900">
                     <div className="max-w-7xl mx-auto space-y-6">
                         
-                        {/* Header Area */}
+                        {/* Header */}
                         <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 pb-6">
                             <div>
                                 <h1 className="text-3xl font-bold text-slate-900 tracking-tight flex items-center gap-3">
-                                    <Icon name="Calculator" size={32} className="text-blue-600" />
-                                    Mortgage Freedom Blueprint
+                                    <Icon name="ShieldCheck" size={32} className="text-blue-600" />
+                                    Mortgage Strategist 2026
                                 </h1>
-                                <p className="text-slate-500 mt-1 italic">Personalized Debt-to-Asset Conversion Simulator</p>
+                                <p className="text-slate-500 mt-1 italic">Specialized Planning for British Columbia High-Earners (53.5%)</p>
                             </div>
-                            <div className="flex gap-4">
-                                <div className="flex items-center gap-3 bg-white px-4 py-2 rounded-xl border border-slate-200 shadow-sm">
-                                    <Icon name="Flag" className="text-blue-600" />
-                                    <div>
-                                        <p className="text-[10px] font-bold text-slate-400 uppercase">Effective Year Zero</p>
-                                        <p className="text-lg font-bold text-slate-900 leading-tight">Year {results.breakevenYear}</p>
-                                    </div>
+                            <div className="flex gap-3">
+                                <div className="bg-white px-4 py-2 rounded-xl border border-slate-200 shadow-sm text-center">
+                                    <p className="text-[10px] font-bold text-slate-400 uppercase">Effective Rate</p>
+                                    <p className="text-lg font-bold text-blue-600 leading-tight">{results.afterTaxBorrowingCost.toFixed(2)}%</p>
                                 </div>
-                                <div className="flex items-center gap-3 bg-blue-600 px-4 py-2 rounded-xl text-white shadow-lg">
-                                    <Icon name="Zap" />
-                                    <div>
-                                        <p className="text-[10px] font-bold opacity-80 uppercase tracking-wider">Arbitrage Yield</p>
-                                        <p className="text-lg font-bold leading-tight">{(investmentReturn - results.afterTaxBorrowingCost).toFixed(2)}%</p>
-                                    </div>
+                                <div className="bg-blue-600 px-4 py-2 rounded-xl text-white shadow-lg text-center">
+                                    <p className="text-[10px] font-bold opacity-80 uppercase">Arbitrage</p>
+                                    <p className="text-lg font-bold leading-tight">+{(investmentReturn - results.afterTaxBorrowingCost).toFixed(2)}%</p>
                                 </div>
                             </div>
                         </header>
 
-                        {/* SECTION: PRESETS */}
-                        <section className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-                            <div className="flex items-center gap-2 mb-4 text-slate-800 font-bold text-sm uppercase tracking-widest border-b border-slate-50 pb-2">
-                                <Icon name="Library" className="text-blue-500" />
-                                Planning Presets
-                            </div>
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                {presets.map((p) => (
-                                    <button key={p.id} onClick={() => applyPreset(p)} 
-                                        className={`preset-btn p-4 rounded-xl border-2 transition-all flex items-center gap-4 ${interestRate === p.rate ? 'border-blue-500 bg-blue-50 ring-4 ring-blue-500/5' : 'border-slate-100 hover:border-slate-200 bg-slate-50/50'}`}>
-                                        <div className={`icon-box w-10 h-10 rounded-lg ${p.color} flex items-center justify-center text-white font-bold transition-transform`}>%</div>
-                                        <div className="text-left">
-                                            <p className="text-sm font-bold text-slate-900">{p.name}</p>
-                                            <p className="text-[10px] text-slate-500 uppercase tracking-tight">Apply Bank Offer</p>
-                                        </div>
-                                    </button>
-                                ))}
-                            </div>
-                        </section>
-
                         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
                             
-                            {/* SECTION: SIDEBAR CONTROLS */}
+                            {/* Controls */}
                             <aside className="lg:col-span-4 space-y-6">
-                                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 space-y-6 overflow-hidden">
-                                    <div className="flex items-center gap-2 text-slate-800 font-bold border-b pb-3 mb-2">
-                                        <Icon name="Settings2" className="text-slate-400" />
-                                        Levers & Inputs
+                                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 space-y-6">
+                                    <div className="flex items-center gap-2 text-slate-800 font-bold border-b pb-3">
+                                        <Icon name="Settings2" className="text-blue-500" />
+                                        Renewal Parameters
                                     </div>
 
-                                    {/* Subsection: Mortgage Profile */}
                                     <div className="space-y-4">
                                         <div>
-                                            <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Mortgage Profile</h3>
-                                            <p className="text-[9px] text-slate-500">Configure your starting loan amount and timeline.</p>
+                                            <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Renewal Balance ($)</label>
+                                            <input type="number" value={loanAmount} onChange={(e) => setLoanAmount(Number(e.target.value))} className="w-full p-2 bg-slate-50 border rounded-lg text-sm font-bold focus:ring-2 focus:ring-blue-500 outline-none" />
                                         </div>
-                                        <div className="grid grid-cols-2 gap-3">
-                                            <div className="col-span-2">
-                                                <label className="block text-[11px] font-medium text-slate-500 mb-1">Mortgage Principal ($)</label>
-                                                <input type="number" value={loanAmount} onChange={(e) => setLoanAmount(Number(e.target.value))} className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium focus:ring-2 focus:ring-blue-500 outline-none" />
-                                            </div>
-                                            <div>
-                                                <label className="block text-[11px] font-medium text-slate-500 mb-1">Rate (%)</label>
-                                                <input type="number" step="0.01" value={interestRate} onChange={(e) => setInterestRate(Number(e.target.value))} className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm" />
-                                            </div>
-                                            <div>
-                                                <label className="block text-[11px] font-medium text-slate-500 mb-1">Amort (Yrs)</label>
-                                                <input type="number" value={amortization} onChange={(e) => setAmortization(Number(e.target.value))} className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm" />
-                                            </div>
+                                        <div className="bg-blue-50 p-3 rounded-xl border border-blue-100">
+                                            <label className="block text-[11px] font-bold text-blue-700 uppercase mb-1 underline">Initial Lump Sum ($)</label>
+                                            <input type="number" value={initialLumpSum} onChange={(e) => setInitialLumpSum(Number(e.target.value))} className="w-full p-2 bg-white border border-blue-200 rounded-lg text-sm font-bold focus:ring-2 focus:ring-blue-500 outline-none" />
                                         </div>
-                                    </div>
-
-                                    {/* Subsection: Initial Actions */}
-                                    <div className="space-y-4 pt-4 border-t border-slate-100">
-                                        <div>
-                                            <h3 className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest">Initial Injection</h3>
-                                            <p className="text-[9px] text-slate-500">One-time payment applied at the start of the simulation.</p>
-                                        </div>
-                                        <input type="number" value={initialLumpSum} onChange={(e) => setInitialLumpSum(Number(e.target.value))} className="w-full p-2 bg-emerald-50 border border-emerald-100 rounded-lg text-sm font-bold text-emerald-700" />
-                                    </div>
-
-                                    {/* Subsection: Tax & Credit Engine */}
-                                    <div className="space-y-4 pt-4 border-t border-slate-100">
-                                        <div>
-                                            <h3 className="text-[10px] font-bold text-indigo-600 uppercase tracking-widest">Tax & Credit Engine</h3>
-                                            <p className="text-[9px] text-slate-500">HELOC costs and your marginal tax bracket.</p>
-                                        </div>
-                                        <div className="grid grid-cols-2 gap-3">
-                                            <div>
-                                                <label className="block text-[11px] font-medium text-slate-500 mb-1">HELOC Rate (%)</label>
-                                                <input type="number" step="0.01" value={helocRate} onChange={(e) => setHelocRate(Number(e.target.value))} className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm" />
-                                            </div>
-                                            <div>
-                                                <label className="block text-[11px] font-medium text-slate-500 mb-1">Tax Rate (%)</label>
-                                                <input type="number" step="0.1" value={taxRate} onChange={(e) => setTaxRate(Number(e.target.value))} className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm" />
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    {/* Subsection: Wealth Engine */}
-                                    <div className="space-y-4 pt-4 border-t border-slate-100">
-                                        <div>
-                                            <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Wealth Engine</h3>
-                                            <p className="text-[9px] text-slate-500">ETF market performance and RRSP contributions.</p>
-                                        </div>
-                                        <div className="grid grid-cols-2 gap-3">
-                                            <div>
-                                                <label className="block text-[11px] font-medium text-slate-500 mb-1">ETF Return (%)</label>
-                                                <input type="number" step="0.1" value={investmentReturn} onChange={(e) => setInvestmentReturn(Number(e.target.value))} className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm" />
-                                            </div>
-                                            <div>
-                                                <label className="block text-[11px] font-medium text-slate-500 mb-1">Annual RRSP ($)</label>
-                                                <input type="number" value={annualRRSPContribution} onChange={(e) => setAnnualRRSPContribution(Number(e.target.value))} className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm" />
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    {/* Subsection: Strategy Loops */}
-                                    <div className="space-y-3 pt-4 border-t border-slate-100">
-                                        <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Strategic Loops</h3>
                                         
-                                        <div className={`p-3 rounded-lg border flex items-center justify-between transition-all ${useSMDeductionRefund ? 'bg-blue-50 border-blue-200' : 'bg-slate-50 border-slate-100'}`}>
-                                            <div className="max-w-[70%]">
-                                                <p className="text-[10px] font-bold text-slate-700">Deduction Shield</p>
-                                                <p className="text-[8px] text-slate-500 leading-tight">Reinvest annual tax savings from interest.</p>
+                                        <div className="grid grid-cols-2 gap-4 pt-2">
+                                            <div>
+                                                <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Term Rate (%)</label>
+                                                <input type="number" step="0.01" value={interestRate} onChange={(e) => setInterestRate(Number(e.target.value))} className="w-full p-2 border rounded-lg text-sm font-medium focus:ring-2 focus:ring-blue-500 outline-none" />
                                             </div>
-                                            <button onClick={() => setUseSMDeductionRefund(!useSMDeductionRefund)} className={`h-4 w-8 rounded-full transition-colors ${useSMDeductionRefund ? 'bg-blue-600' : 'bg-slate-300'} relative`}>
-                                                <div className={`h-2 w-2 bg-white rounded-full absolute top-1 transition-all ${useSMDeductionRefund ? 'right-1' : 'left-1'}`} />
+                                            <div>
+                                                <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Product Type</label>
+                                                <button onClick={() => setIsVariable(!isVariable)} className={`w-full p-2 rounded-lg text-xs font-bold uppercase transition-colors ${isVariable ? 'bg-orange-100 text-orange-700 border-orange-200' : 'bg-blue-100 text-blue-700 border-blue-200'} border`}>
+                                                    {isVariable ? 'Variable' : 'Fixed'}
+                                                </button>
+                                            </div>
+                                        </div>
+
+                                        {isVariable && (
+                                            <div className="p-3 bg-orange-50 border border-orange-200 rounded-xl space-y-2">
+                                                <label className="block text-[10px] font-bold text-orange-700 uppercase">BoC Hike Forecast (%/yr)</label>
+                                                <input type="range" min="0" max="1" step="0.1" value={varSpread} onChange={(e) => setVarSpread(Number(e.target.value))} className="w-full accent-orange-600" />
+                                                <div className="flex justify-between text-[9px] font-bold text-orange-600 uppercase"><span>Stable</span><span>+{varSpread}% Hike</span></div>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    <div className="pt-4 border-t space-y-4">
+                                        <div className="flex items-center gap-2 text-slate-800 font-bold">
+                                            <Icon name="Zap" className="text-emerald-500" />
+                                            Conversion Loops
+                                        </div>
+
+                                        <div className={`p-4 rounded-2xl border transition-all flex items-center justify-between ${useSMDeductionRefund ? 'bg-blue-50 border-blue-200 shadow-inner' : 'bg-slate-50 border-slate-100'}`}>
+                                            <div className="max-w-[70%]">
+                                                <p className="text-[11px] font-bold text-slate-700 uppercase tracking-tight">Deduction Shield</p>
+                                                <p className="text-[9px] text-slate-500 leading-tight">Reinvest interest tax savings.</p>
+                                            </div>
+                                            <button onClick={() => setUseSMDeductionRefund(!useSMDeductionRefund)} className={`h-5 w-10 rounded-full transition-colors ${useSMDeductionRefund ? 'bg-blue-600' : 'bg-slate-300'} relative`}>
+                                                <div className={`h-3 w-3 bg-white rounded-full absolute top-1 transition-all ${useSMDeductionRefund ? 'right-1' : 'left-1'}`} />
                                             </button>
                                         </div>
 
-                                        <div className={`p-3 rounded-lg border flex items-center justify-between transition-all ${useAccelerator ? 'bg-emerald-50 border-emerald-200' : 'bg-slate-50 border-slate-100'}`}>
+                                        <div className={`p-4 rounded-2xl border transition-all flex items-center justify-between ${useAccelerator ? 'bg-emerald-50 border-emerald-200 shadow-inner' : 'bg-slate-50 border-slate-100'}`}>
                                             <div className="max-w-[70%]">
-                                                <p className="text-[10px] font-bold text-slate-700">RRSP Accelerator</p>
-                                                <p className="text-[8px] text-slate-500 leading-tight">Apply variable RRSP refunds to principal.</p>
+                                                <p className="text-[11px] font-bold text-slate-700 uppercase tracking-tight">RRSP Accelerator</p>
+                                                <p className="text-[9px] text-slate-500 leading-tight">Apply RRSP refunds to principal.</p>
                                             </div>
-                                            <button onClick={() => setUseAccelerator(!useAccelerator)} className={`h-4 w-8 rounded-full transition-colors ${useAccelerator ? 'bg-emerald-600' : 'bg-slate-300'} relative`}>
-                                                <div className={`h-2 w-2 bg-white rounded-full absolute top-1 transition-all ${useAccelerator ? 'right-1' : 'left-1'}`} />
+                                            <button onClick={() => setUseAccelerator(!useAccelerator)} className={`h-5 w-10 rounded-full transition-colors ${useAccelerator ? 'bg-emerald-600' : 'bg-slate-300'} relative`}>
+                                                <div className={`h-3 w-3 bg-white rounded-full absolute top-1 transition-all ${useAccelerator ? 'right-1' : 'left-1'}`} />
                                             </button>
                                         </div>
                                     </div>
+                                </div>
+
+                                <div className="bg-amber-50 border border-amber-200 p-4 rounded-2xl">
+                                    <div className="flex items-center gap-2 text-amber-800 font-bold text-[10px] uppercase tracking-wider mb-2">
+                                        <Icon name="AlertTriangle" size={16} />
+                                        Compliance Audit
+                                    </div>
+                                    <ul className="text-[10px] text-amber-700 space-y-1 font-medium leading-tight">
+                                        <li>• High Earner (53.5%) MUST own investment account.</li>
+                                        <li>• Pay HELOC interest from salary, not re-borrowing.</li>
+                                        <li>• Property value must support 80% LTV floor.</li>
+                                    </ul>
                                 </div>
                             </aside>
 
-                            {/* MAIN DASHBOARD */}
+                            {/* Dashboard */}
                             <main className="lg:col-span-8 space-y-6">
                                 
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                    <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm border-t-4 border-t-blue-500">
-                                        <p className="text-slate-500 text-[10px] font-bold uppercase tracking-widest flex items-center gap-1">
+                                    <div className="bg-white p-5 rounded-2xl border shadow-sm border-t-4 border-t-blue-500">
+                                        <p className="text-slate-500 text-[10px] font-bold uppercase tracking-widest flex items-center gap-1 mb-1">
                                             <Icon name="Wallet" size={12} className="text-blue-500" />
-                                            Monthly Outlay
+                                            Monthly Commit
                                         </p>
-                                        <h3 className="text-2xl font-bold text-slate-900 mt-1">${Math.round(results.monthlyMortgagePayment).toLocaleString()}</h3>
-                                        <p className="text-[10px] text-slate-400 italic">Base Amortization Payment</p>
+                                        <h3 className="text-2xl font-bold text-slate-900">
+                                            ${Math.round(results.monthlyMortgagePayment + results.finalHelocInterestMth).toLocaleString()}
+                                        </h3>
+                                        <p className="text-[9px] text-slate-400 font-medium">Mtg + Max HELOC Interest</p>
                                     </div>
-                                    <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm border-t-4 border-t-emerald-500">
-                                        <p className="text-emerald-600 text-[10px] font-bold uppercase tracking-widest">Borrowing Cost</p>
-                                        <h3 className="text-2xl font-bold text-slate-900 mt-1">{results.afterTaxBorrowingCost.toFixed(2)}%</h3>
-                                        <p className="text-[10px] text-slate-400 italic">Effective after {taxRate}% Tax Shield</p>
+                                    <div className="bg-white p-5 rounded-2xl border shadow-sm border-t-4 border-t-emerald-500">
+                                        <p className="text-emerald-600 text-[10px] font-bold uppercase tracking-widest flex items-center gap-1 mb-1">
+                                            <Icon name="TrendingUp" size={12} />
+                                            3yr Portfolio
+                                        </p>
+                                        <h3 className="text-2xl font-bold text-slate-900">${Math.round(results.endingPortfolio).toLocaleString()}</h3>
+                                        <p className="text-[9px] text-emerald-500 font-medium">Invested Equity Assets</p>
                                     </div>
-                                    <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm border-t-4 border-t-indigo-500">
-                                        <p className="text-indigo-600 text-[10px] font-bold uppercase tracking-widest">Effective Zero</p>
-                                        <h3 className="text-2xl font-bold text-slate-900 mt-1">Yr {results.breakevenYear}</h3>
-                                        <p className="text-[10px] text-slate-400 italic">Moment assets equal debt</p>
+                                    <div className="bg-white p-5 rounded-2xl border shadow-sm border-t-4 border-t-red-500">
+                                        <p className="text-red-600 text-[10px] font-bold uppercase tracking-widest flex items-center gap-1 mb-1">
+                                            <Icon name="TrendingDown" size={12} />
+                                            Remaining Debt
+                                        </p>
+                                        <h3 className="text-2xl font-bold text-slate-900">${Math.round(results.endingBalance).toLocaleString()}</h3>
+                                        <p className="text-[9px] text-red-500 font-medium">Term-End Principal</p>
                                     </div>
                                 </div>
 
-                                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                                <div className="bg-white p-8 rounded-3xl border shadow-sm">
                                     <div className="flex items-center justify-between mb-8">
                                         <div>
-                                            <h2 className="text-xl font-bold text-slate-800 tracking-tight">Convergence Visualization</h2>
-                                            <p className="text-xs text-slate-500 font-medium italic tracking-tight">Tracking the full 25-year lifecycle of the conversion engine.</p>
+                                            <h2 className="text-xl font-bold text-slate-800 tracking-tight">Term Debt Conversion Curve</h2>
+                                            <p className="text-xs text-slate-500 font-medium italic">Remaining Mortgage vs. Portfolio Growth (June 2026 - 2029)</p>
                                         </div>
                                         <div className="hidden sm:flex gap-4 text-[10px] font-bold uppercase tracking-widest text-slate-400">
-                                            <span className="flex items-center gap-1"><div className="w-2 h-2 bg-red-400 rounded-full" /> Mortgage</span>
+                                            <span className="flex items-center gap-1"><div className="w-2 h-2 bg-red-400 rounded-full" /> Debt</span>
                                             <span className="flex items-center gap-1"><div className="w-2 h-2 bg-emerald-400 rounded-full" /> Assets</span>
                                         </div>
                                     </div>
-                                    <div className="h-[450px] w-full">
+                                    <div className="h-[400px] w-full">
                                         <ResponsiveContainer width="100%" height="100%">
-                                            <AreaChart data={results.data} margin={{ top: 20, right: 30, left: 10, bottom: 0 }}>
+                                            <AreaChart data={results.data} margin={{ top: 10, right: 30, left: 10, bottom: 0 }}>
                                                 <defs>
                                                     <linearGradient id="colorBalance" x1="0" y1="0" x2="0" y2="1">
                                                         <stop offset="5%" stopColor="#ef4444" stopOpacity={0.15}/>
@@ -357,36 +313,36 @@
                                                     </linearGradient>
                                                 </defs>
                                                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                                                <XAxis dataKey="year" stroke="#94a3b8" fontSize={11} tickLine={false} axisLine={false} />
-                                                <YAxis stroke="#94a3b8" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(v) => `$${(v/1000000).toFixed(1)}M`} />
+                                                <XAxis dataKey="month" stroke="#94a3b8" fontSize={11} tickLine={false} axisLine={false} label={{ value: 'Months', position: 'insideBottomRight', offset: -10, fontSize: 10 }} />
+                                                <YAxis stroke="#94a3b8" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(v) => `$${(v/1000)}k`} />
                                                 <Tooltip 
                                                     contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)' }} 
-                                                    formatter={(v) => `$${v.toLocaleString()}`} 
-                                                    labelFormatter={(label) => `Year ${label}`} 
+                                                    formatter={(v) => [`$${v.toLocaleString()}`, '']} 
+                                                    labelFormatter={(label) => `Month ${label}`} 
                                                 />
-                                                <Legend verticalAlign="top" height={36}/>
-                                                {results.breakevenYear !== "None" && (
-                                                    <ReferenceLine x={parseFloat(results.breakevenYear)} stroke="#3b82f6" strokeDasharray="3 3" strokeWidth={2}>
-                                                        <Label value={`BREAKEVEN YR ${results.breakevenYear}`} position="top" fill="#3b82f6" fontSize={10} fontWeight="bold" />
-                                                    </ReferenceLine>
-                                                )}
-                                                <Area type="monotone" dataKey="balance" name="Mortgage Debt" stroke="#ef4444" fill="url(#colorBalance)" strokeWidth={4} />
-                                                <Area type="monotone" dataKey="portfolio" name="Liquid Assets" stroke="#10b981" fill="url(#colorInvest)" strokeWidth={4} />
+                                                <Area type="monotone" dataKey="balance" name="Remaining Debt" stroke="#ef4444" fill="url(#colorBalance)" strokeWidth={3} />
+                                                <Area type="monotone" dataKey="portfolio" name="Assets Created" stroke="#10b981" fill="url(#colorInvest)" strokeWidth={3} />
                                             </AreaChart>
                                         </ResponsiveContainer>
                                     </div>
+                                    <div className="mt-6 p-4 bg-slate-50 rounded-2xl flex items-center gap-3 border border-slate-100">
+                                        <Icon name="TrendingUp" className="text-blue-500" />
+                                        <p className="text-xs text-slate-600 font-medium leading-relaxed">
+                                            By June 2029, you will have successfully converted <span className="font-bold text-slate-900">${Math.round(results.endingPortfolio).toLocaleString()}</span> of "dead equity" into liquid, tax-deductible investment capital.
+                                        </p>
+                                    </div>
                                 </div>
 
-                                <footer className="bg-slate-900 border border-slate-800 p-6 rounded-2xl text-slate-400 text-[10px] flex items-start gap-4 uppercase tracking-widest font-bold">
-                                    <Icon name="Info" size={24} className="text-blue-500 shrink-0" />
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-12 w-full leading-relaxed">
-                                        <div className="space-y-2">
-                                            <p className="text-white">Effective Year Zero</p>
-                                            <p>This point represents the moment you could choose to pay off the mortgage entirely using your liquid investment portfolio, making you "effectively" debt-free.</p>
+                                <footer className="bg-slate-900 border border-slate-800 p-6 rounded-3xl text-slate-400 text-[10px] flex items-start gap-4 uppercase tracking-widest font-bold">
+                                    <Icon name="Info" size={24} className="text-blue-400 shrink-0" />
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8 w-full leading-relaxed">
+                                        <div>
+                                            <p className="text-white mb-1 text-xs">Interest Arbitrage Strategy</p>
+                                            <p>This strategy relies on the spread between your after-tax cost of borrowing ({results.afterTaxBorrowingCost.toFixed(2)}%) and your target ETF return ({investmentReturn}%). A positive spread compounds wealth over time.</p>
                                         </div>
-                                        <div className="space-y-2">
-                                            <p className="text-white">Planning Assumption</p>
-                                            <p>This is a mathematical simulation. Actual performance depends on real-world bank products, marginal tax rates, and stock market volatility.</p>
+                                        <div>
+                                            <p className="text-white mb-1 text-xs">Market Volatility Warning</p>
+                                            <p>The Smith Manoeuvre is a leveraged investment strategy. Ensure your risk tolerance supports potential market declines, as the loan balance remains constant regardless of ETF performance.</p>
                                         </div>
                                     </div>
                                 </footer>
