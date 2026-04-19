@@ -5,15 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Financial Audit Dashboard</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
-    <!-- PropTypes MUST be available before Recharts runs -->
-    <script src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js"></script>
-    <script>window.PropTypes = window.PropTypes || window['prop-types'];</script>
-    <!-- Use a stable version of Recharts to prevent UMD dependency issues -->
-    <script src="https://unpkg.com/recharts@2.1.9/umd/Recharts.js"></script>
+    
+    <!-- Core React -->
+    <script src="https://unpkg.com/react@18.2.0/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
+    
+    <!-- Icons & Babel -->
     <script src="https://unpkg.com/lucide@latest"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
         body { font-family: 'Inter', sans-serif; }
@@ -29,23 +29,16 @@
 
     <script type="text/babel">
         const { useState, useMemo, useRef, useEffect } = React;
-        const { 
-            AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip: RechartsTooltip, ResponsiveContainer 
-        } = Recharts;
 
         // --- Robust Lucide Icon Renderer ---
         const Icon = ({ name, size = 16, className = "" }) => {
             const ref = useRef(null);
             useEffect(() => {
                 if (ref.current && window.lucide) {
-                    // Create an i tag and let Lucide replace it specifically within this ref scope
                     ref.current.innerHTML = `<i data-lucide="${name}" class="${className}"></i>`;
                     window.lucide.createIcons({
                         root: ref.current,
-                        attrs: {
-                            width: size,
-                            height: size,
-                        }
+                        attrs: { width: size, height: size }
                     });
                 }
             }, [name, size, className]);
@@ -54,6 +47,7 @@
 
         const App = () => {
             const [transactions, setTransactions] = useState([]);
+            const [dateFilter, setDateFilter] = useState('All');
             const [selectedFilter, setSelectedFilter] = useState(null);
             const [expandedCategories, setExpandedCategories] = useState({});
             const [activeDetailMerchant, setActiveDetailMerchant] = useState(null);
@@ -74,14 +68,34 @@
                 return "Tag";
             };
 
+            // Calculate available years for the quick presets
+            const availableYears = useMemo(() => {
+                const years = new Set();
+                transactions.forEach(t => {
+                    const date = new Date(t.date);
+                    if (!isNaN(date)) years.add(date.getFullYear());
+                });
+                return Array.from(years).sort((a, b) => b - a); // Descending order
+            }, [transactions]);
+
+            // Filter transactions by selected year
+            const filteredTransactions = useMemo(() => {
+                if (dateFilter === 'All') return transactions;
+                return transactions.filter(t => {
+                    const date = new Date(t.date);
+                    return !isNaN(date) && date.getFullYear().toString() === dateFilter;
+                });
+            }, [transactions, dateFilter]);
+
+            // Date Range Display based on filtered data
             const DATE_RANGE = useMemo(() => {
-                if (transactions.length === 0) return "Awaiting CSV Data";
-                const dates = transactions.map(t => new Date(t.date)).filter(d => !isNaN(d));
+                if (filteredTransactions.length === 0) return "No Data in Range";
+                const dates = filteredTransactions.map(t => new Date(t.date)).filter(d => !isNaN(d));
                 if (dates.length === 0) return "No Valid Dates";
                 const start = new Date(Math.min(...dates)).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
                 const end = new Date(Math.max(...dates)).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
                 return `${start} – ${end}`;
-            }, [transactions]);
+            }, [filteredTransactions]);
 
             const handleFileUpload = (event) => {
                 const file = event.target.files[0];
@@ -91,16 +105,34 @@
                     const text = e.target.result;
                     const rows = text.split('\n').filter(row => row.trim() !== '');
                     const parsed = rows.slice(1).map(row => {
-                        const columns = row.split(',').map(c => c.trim());
+                        const cols = [];
+                        let current = '';
+                        let inQuotes = false;
+                        for (let i = 0; i < row.length; i++) {
+                            if (row[i] === '"') {
+                                inQuotes = !inQuotes;
+                            } else if (row[i] === ',' && !inQuotes) {
+                                cols.push(current.trim());
+                                current = '';
+                            } else {
+                                current += row[i];
+                            }
+                        }
+                        cols.push(current.trim());
+
                         return {
-                            date: columns[0],
-                            merchant: columns[1],
-                            category: columns[2],
-                            type: columns[3], 
-                            amount: parseFloat(columns[4])
+                            date: cols[0],
+                            merchant: cols[1],
+                            category: cols[2],
+                            type: cols[3], 
+                            amount: parseFloat(cols[4]),
+                            // Fallback to merchant if 6th column (Original Title) is missing
+                            originalTitle: cols[5] ? cols[5].replace(/^"|"$/g, '') : cols[1]
                         };
-                    }).filter(t => !isNaN(t.amount));
+                    }).filter(t => !isNaN(t.amount) && t.category?.trim().toLowerCase() !== 'transfer');
+                    
                     setTransactions(parsed);
+                    setDateFilter('All');
                     setSelectedFilter(null);
                     setActiveDetailMerchant(null);
                     if (fileInputRef.current) fileInputRef.current.value = '';
@@ -112,7 +144,7 @@
                 const categories = {};
                 const monthlyGroups = {};
                 
-                transactions.forEach(t => {
+                filteredTransactions.forEach(t => {
                     const absAmount = Math.abs(t.amount);
                     if (!categories[t.category]) {
                         categories[t.category] = { 
@@ -132,7 +164,12 @@
                     }
                     categories[t.category].merchants[t.merchant].value += absAmount;
                     categories[t.category].merchants[t.merchant].count += 1;
-                    categories[t.category].merchants[t.merchant].transactions.push({ date: t.date, amount: absAmount });
+                    categories[t.category].merchants[t.merchant].transactions.push({ 
+                        date: t.date, 
+                        amount: absAmount, 
+                        merchant: t.merchant, 
+                        originalTitle: t.originalTitle 
+                    });
 
                     const dateObj = new Date(t.date);
                     if (!isNaN(dateObj)) {
@@ -167,11 +204,11 @@
                     totals: { 
                         needs: categoryArray.filter(c => c.group === 'Needs').reduce((acc, curr) => acc + curr.value, 0),
                         wants: categoryArray.filter(c => c.group === 'Wants').reduce((acc, curr) => acc + curr.value, 0),
-                        income: transactions.filter(t => t.type === 'Inflow').reduce((acc, curr) => acc + curr.amount, 0),
-                        surplus: transactions.filter(t => t.type === 'Inflow').reduce((acc, curr) => acc + curr.amount, 0) - categoryArray.filter(c => c.group !== 'Income').reduce((acc, curr) => acc + curr.value, 0)
+                        income: filteredTransactions.filter(t => t.type === 'Inflow').reduce((acc, curr) => acc + curr.amount, 0),
+                        surplus: filteredTransactions.filter(t => t.type === 'Inflow').reduce((acc, curr) => acc + curr.amount, 0) - categoryArray.filter(c => c.group !== 'Income').reduce((acc, curr) => acc + curr.value, 0)
                     }
                 };
-            }, [transactions]);
+            }, [filteredTransactions]);
 
             const handleSelectFilter = (type, item, color) => {
                 if (selectedFilter?.name === item.name) setSelectedFilter(null);
@@ -301,21 +338,46 @@
 
             return (
                 <div className="min-h-screen p-4 md:p-8 bg-slate-50">
-                    <header className="max-w-7xl mx-auto mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
-                        <div>
-                            <h1 className="text-3xl font-black tracking-tight uppercase text-slate-800">Financial Audit Flow</h1>
-                            <div className="flex items-center gap-2 text-slate-500 bg-white px-3 py-1.5 rounded-full border border-slate-200 shadow-sm w-fit mt-2">
-                                <Icon name="Calendar" className="text-blue-500" />
-                                <p className="text-xs font-black uppercase tracking-widest">{DATE_RANGE}</p>
+                    <header className="max-w-7xl mx-auto mb-8 flex flex-col md:flex-row md:items-end justify-between gap-6">
+                        <div className="space-y-4">
+                            <div className="space-y-1">
+                                <h1 className="text-3xl font-black tracking-tight uppercase text-slate-800">Financial Audit Flow</h1>
+                                <div className="flex items-center gap-2 text-slate-500 bg-white px-3 py-1.5 rounded-full border border-slate-200 shadow-sm w-fit mt-2">
+                                    <Icon name="Calendar" className="text-blue-500" />
+                                    <p className="text-xs font-black uppercase tracking-widest">{DATE_RANGE}</p>
+                                </div>
                             </div>
+                            
+                            {/* Date Presets Filter */}
+                            {transactions.length > 0 && (
+                                <div className="flex flex-wrap items-center gap-2 pt-2">
+                                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mr-2">Filter Year:</span>
+                                    <button 
+                                        onClick={() => { setDateFilter('All'); setActiveDetailMerchant(null); }}
+                                        className={`px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-widest transition-all border ${dateFilter === 'All' ? 'bg-indigo-600 text-white border-indigo-600 shadow-md' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-100'}`}
+                                    >
+                                        All Time
+                                    </button>
+                                    {availableYears.map(year => (
+                                        <button 
+                                            key={year} 
+                                            onClick={() => { setDateFilter(year.toString()); setActiveDetailMerchant(null); }}
+                                            className={`px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-widest transition-all border ${dateFilter === year.toString() ? 'bg-indigo-600 text-white border-indigo-600 shadow-md' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-100'}`}
+                                        >
+                                            {year}
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
                         </div>
-                        <div className="flex items-center gap-3 relative">
+
+                        <div className="flex items-center gap-3 relative shrink-0">
                             <div onMouseEnter={() => setShowImportHint(true)} onMouseLeave={() => setShowImportHint(false)} className="p-2.5 bg-slate-200 text-slate-600 rounded-full cursor-help hover:bg-slate-300 transition-all"><Icon name="Info" size={20} /></div>
                             {showImportHint && (
                                 <div className="absolute top-full right-0 mt-3 w-80 bg-slate-900 text-white p-6 rounded-[2rem] shadow-2xl z-[100] border border-white/10 animate-in fade-in zoom-in duration-200">
                                    <h4 className="text-[10px] font-black uppercase tracking-widest mb-3 text-indigo-400">Required CSV Schema</h4>
                                    <p className="text-[10px] text-slate-300 leading-relaxed font-bold">Upload a file with these headers:<br/>
-                                     <code className="text-emerald-400 block my-2 bg-white/5 p-2 rounded font-mono text-[9px]">Date, Merchant, Category, Type, Amount</code>
+                                     <code className="text-emerald-400 block my-2 bg-white/5 p-2 rounded font-mono text-[9px]">Date, Merchant, Category, Type, Amount, Original Title</code>
                                      <span className="text-slate-500 uppercase tracking-tighter">Valid Types:</span> Need, Want, Inflow
                                    </p>
                                    <div className="absolute bottom-full right-5 border-8 border-transparent border-b-slate-900"></div>
@@ -348,7 +410,7 @@
                         {/* Sankey */}
                         <div className="bg-white p-10 rounded-[2.5rem] shadow-xl overflow-hidden border border-slate-100 relative">
                             <div className="flex items-center gap-3 mb-10"><Icon name="Share2" size={24} className="text-indigo-600" /><h3 className="font-black text-xl uppercase tracking-tighter italic text-slate-800">Flow Synthesis</h3></div>
-                            {transactions.length > 0 ? (
+                            {filteredTransactions.length > 0 ? (
                                 <div className="py-4 overflow-x-auto">
                                     <div className="min-w-[900px]">
                                         {renderSankey()}
@@ -357,127 +419,143 @@
                             ) : (
                                 <div className="h-64 flex flex-col items-center justify-center text-slate-200 italic font-black uppercase tracking-widest">
                                     <Icon name="Database" size={64} className="opacity-10 mb-4" />
-                                    Awaiting CSV Data
+                                    No Data in Selected Range
                                 </div>
                             )}
                         </div>
 
-                        {/* Drill-down */}
-                        <div className="grid grid-cols-1 gap-6 pb-12">
-                            <div className="bg-white p-8 rounded-[2.5rem] shadow-sm flex flex-col h-[42rem] border border-slate-100">
+                        {/* Full Width Drill-down */}
+                        <div className="grid grid-cols-1 pb-12">
+                            <div className="bg-white p-8 rounded-[2.5rem] shadow-sm flex flex-col h-[50rem] border border-slate-100">
                                 <h3 className="font-black text-lg uppercase tracking-tighter text-slate-800 mb-6 italic underline decoration-indigo-500 underline-offset-8 decoration-4">Income & Expenses</h3>
-                                <div className="flex flex-1 gap-4 overflow-hidden">
-                                    <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar space-y-12">
-                                        {/* Income Section */}
-                                        <div className="space-y-4">
-                                            <div className="flex items-center gap-2 border-b-2 border-emerald-500/20 pb-2 font-black uppercase text-[11px] text-emerald-700"><Icon name="ArrowUpCircle" className="text-emerald-600" />Cash Inflow</div>
-                                            {processedData.categoryData.filter(c => c.group === 'Income').map(cat => (
-                                                <div key={cat.id} className={`border-2 rounded-3xl transition-all duration-300 overflow-hidden ${selectedFilter?.id === cat.id ? 'border-emerald-500 bg-emerald-50/20' : 'border-slate-100 bg-slate-50'}`}>
-                                                    <div className="flex items-stretch border-b border-slate-100/50 last:border-0">
-                                                        <button 
-                                                            onClick={() => handleSelectFilter('category', cat, '#10b981')} 
-                                                            className="p-4 flex-1 flex items-center gap-3 text-left hover:bg-emerald-50 transition-colors"
-                                                        >
-                                                            <Icon name={getCategoryIconName(cat.name)} className="text-emerald-500" />
-                                                            <span className="font-black text-slate-700 text-[11px] truncate">{cat.name}</span>
-                                                            <span className="text-[11px] font-black text-emerald-600 ml-auto">${cat.value.toLocaleString()}</span>
-                                                        </button>
-                                                        <button 
-                                                            onClick={() => toggleCategory(cat.id)} 
-                                                            className="px-5 border-l border-slate-100 text-slate-400 hover:bg-emerald-50 transition-colors flex items-center justify-center"
-                                                        >
-                                                            <Icon name={expandedCategories[cat.id] ? "ChevronUp" : "ChevronDown"} />
-                                                        </button>
-                                                    </div>
-                                                    {expandedCategories[cat.id] && (
-                                                        <div className="px-4 pb-4 space-y-2 pt-2 border-t border-slate-100">
-                                                            {cat.merchants.map((m, idx) => (
-                                                                <div key={idx} className="flex items-center justify-between bg-white rounded-xl p-3 shadow-sm border border-emerald-100">
-                                                                    <div className="flex-1 truncate text-[10px] font-black text-slate-700 pr-2">
-                                                                        {m.name}<br/>
-                                                                        <span className="text-emerald-600 font-black">${m.value.toLocaleString()}</span>
-                                                                    </div>
-                                                                    <button onClick={() => setActiveDetailMerchant(m)} className="p-2 bg-emerald-50 text-emerald-600 rounded-lg hover:bg-emerald-600 hover:text-white transition-all"><Icon name="Activity" size={14}/></button>
-                                                                </div>
-                                                            ))}
+                                <div className="flex flex-1 gap-6 overflow-hidden">
+                                    
+                                    {/* Left Split: Income / Expenses Lists */}
+                                    <div className="flex-1 flex gap-6 overflow-hidden">
+                                        <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar space-y-12">
+                                            {/* Income Section */}
+                                            <div className="space-y-4">
+                                                <div className="flex items-center gap-2 border-b-2 border-emerald-500/20 pb-2 font-black uppercase text-[11px] text-emerald-700"><Icon name="ArrowUpCircle" className="text-emerald-600" />Cash Inflow</div>
+                                                {processedData.categoryData.filter(c => c.group === 'Income').length === 0 && <p className="text-[10px] uppercase font-bold text-slate-400 pl-2">No income in this period</p>}
+                                                {processedData.categoryData.filter(c => c.group === 'Income').map(cat => (
+                                                    <div key={cat.id} className={`border-2 rounded-3xl transition-all duration-300 overflow-hidden ${selectedFilter?.id === cat.id ? 'border-emerald-500 bg-emerald-50/20' : 'border-slate-100 bg-slate-50'}`}>
+                                                        <div className="flex items-stretch border-b border-slate-100/50 last:border-0">
+                                                            <button 
+                                                                onClick={() => handleSelectFilter('category', cat, '#10b981')} 
+                                                                className="p-4 flex-1 flex items-center gap-3 text-left hover:bg-emerald-50 transition-colors"
+                                                            >
+                                                                <Icon name={getCategoryIconName(cat.name)} className="text-emerald-500" />
+                                                                <span className="font-black text-slate-700 text-[11px] truncate">{cat.name}</span>
+                                                                <span className="text-[11px] font-black text-emerald-600 ml-auto">${cat.value.toLocaleString()}</span>
+                                                            </button>
+                                                            <button 
+                                                                onClick={() => toggleCategory(cat.id)} 
+                                                                className="px-5 border-l border-slate-100 text-slate-400 hover:bg-emerald-50 transition-colors flex items-center justify-center"
+                                                            >
+                                                                <Icon name={expandedCategories[cat.id] ? "ChevronUp" : "ChevronDown"} />
+                                                            </button>
                                                         </div>
-                                                    )}
-                                                </div>
-                                            ))}
-                                        </div>
+                                                        {expandedCategories[cat.id] && (
+                                                            <div className="px-4 pb-4 space-y-2 pt-2 border-t border-slate-100">
+                                                                {cat.merchants.map((m, idx) => (
+                                                                    <div key={idx} className="flex items-center justify-between bg-white rounded-xl p-3 shadow-sm border border-emerald-100">
+                                                                        <div className="flex-1 truncate text-[10px] font-black text-slate-700 pr-2">
+                                                                            {m.name}<br/>
+                                                                            <span className="text-emerald-600 font-black">${m.value.toLocaleString()}</span>
+                                                                        </div>
+                                                                        <button onClick={() => setActiveDetailMerchant(m)} className="p-2 bg-emerald-50 text-emerald-600 rounded-lg hover:bg-emerald-600 hover:text-white transition-all"><Icon name="Activity" size={14}/></button>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                ))}
+                                            </div>
 
-                                        {/* Expenses Section */}
-                                        <div className="space-y-4">
-                                            <div className="flex items-center gap-2 border-b-2 border-rose-500/20 pb-2 font-black uppercase text-[11px] text-rose-700"><Icon name="ArrowDownCircle" className="text-rose-600" />Expenditure</div>
-                                            {processedData.categoryData.filter(c => c.group !== 'Income').map(cat => (
-                                                <div key={cat.id} className={`border-2 rounded-3xl transition-all duration-300 overflow-hidden ${selectedFilter?.id === cat.id ? 'border-slate-900 bg-slate-50' : 'border-slate-100 bg-slate-50'}`}>
-                                                    <div className="flex items-stretch border-b border-slate-100/50 last:border-0">
-                                                        <button 
-                                                            onClick={() => handleSelectFilter('category', cat, cat.group === 'Needs' ? '#0ea5e9' : '#f43f5e')} 
-                                                            className="flex items-center gap-3 p-4 flex-1 text-left hover:text-indigo-600 hover:bg-slate-100 transition-colors"
-                                                        >
-                                                            <Icon name={getCategoryIconName(cat.name)} className={cat.group === 'Needs' ? 'text-sky-500' : 'text-rose-500'} />
-                                                            <span className="font-black text-slate-700 text-[11px] truncate">{cat.name}</span>
-                                                            <span className="text-[11px] font-black text-slate-900 ml-auto">${cat.value.toLocaleString()}</span>
-                                                        </button>
-                                                        <button 
-                                                            onClick={() => toggleCategory(cat.id)} 
-                                                            className="px-5 border-l border-slate-200 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors flex items-center justify-center"
-                                                        >
-                                                            <Icon name={expandedCategories[cat.id] ? "ChevronUp" : "ChevronDown"} />
-                                                        </button>
-                                                    </div>
-                                                    {expandedCategories[cat.id] && (
-                                                        <div className="px-4 pb-4 space-y-2 pt-2 border-t border-slate-200/50">
-                                                            {cat.merchants.map((m, idx) => (
-                                                                <div key={idx} className="flex items-center justify-between bg-white rounded-xl p-3 shadow-sm border border-slate-100">
-                                                                    <div className="flex-1 truncate text-[10px] font-black text-slate-700 pr-2">
-                                                                        {m.name}<br/>
-                                                                        <span className="text-rose-600">${m.value.toLocaleString()}</span>
-                                                                    </div>
-                                                                    <div className="flex items-center gap-2">
-                                                                        <span className="text-[8px] font-black text-slate-400 uppercase tracking-tighter">{m.count}x</span>
-                                                                        <button onClick={() => setActiveDetailMerchant(m)} className="p-2 bg-slate-50 text-slate-400 hover:text-indigo-600 rounded-lg transition-colors border border-slate-100">
-                                                                            <Icon name="Activity" size={14}/>
-                                                                        </button>
-                                                                    </div>
-                                                                </div>
-                                                            ))}
+                                            {/* Expenses Section */}
+                                            <div className="space-y-4">
+                                                <div className="flex items-center gap-2 border-b-2 border-rose-500/20 pb-2 font-black uppercase text-[11px] text-rose-700"><Icon name="ArrowDownCircle" className="text-rose-600" />Expenditure</div>
+                                                {processedData.categoryData.filter(c => c.group !== 'Income').length === 0 && <p className="text-[10px] uppercase font-bold text-slate-400 pl-2">No expenses in this period</p>}
+                                                {processedData.categoryData.filter(c => c.group !== 'Income').map(cat => (
+                                                    <div key={cat.id} className={`border-2 rounded-3xl transition-all duration-300 overflow-hidden ${selectedFilter?.id === cat.id ? 'border-slate-900 bg-slate-50' : 'border-slate-100 bg-slate-50'}`}>
+                                                        <div className="flex items-stretch border-b border-slate-100/50 last:border-0">
+                                                            <button 
+                                                                onClick={() => handleSelectFilter('category', cat, cat.group === 'Needs' ? '#0ea5e9' : '#f43f5e')} 
+                                                                className="flex items-center gap-3 p-4 flex-1 text-left hover:text-indigo-600 hover:bg-slate-100 transition-colors"
+                                                            >
+                                                                <Icon name={getCategoryIconName(cat.name)} className={cat.group === 'Needs' ? 'text-sky-500' : 'text-rose-500'} />
+                                                                <span className="font-black text-slate-700 text-[11px] truncate">{cat.name}</span>
+                                                                <span className="text-[11px] font-black text-slate-900 ml-auto">${cat.value.toLocaleString()}</span>
+                                                            </button>
+                                                            <button 
+                                                                onClick={() => toggleCategory(cat.id)} 
+                                                                className="px-5 border-l border-slate-200 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors flex items-center justify-center"
+                                                            >
+                                                                <Icon name={expandedCategories[cat.id] ? "ChevronUp" : "ChevronDown"} />
+                                                            </button>
                                                         </div>
-                                                    )}
-                                                </div>
-                                            ))}
+                                                        {expandedCategories[cat.id] && (
+                                                            <div className="px-4 pb-4 space-y-2 pt-2 border-t border-slate-200/50">
+                                                                {cat.merchants.map((m, idx) => (
+                                                                    <div key={idx} className="flex items-center justify-between bg-white rounded-xl p-3 shadow-sm border border-slate-100">
+                                                                        <div className="flex-1 truncate text-[10px] font-black text-slate-700 pr-2">
+                                                                            {m.name}<br/>
+                                                                            <span className="text-rose-600">${m.value.toLocaleString()}</span>
+                                                                        </div>
+                                                                        <div className="flex items-center gap-2">
+                                                                            <span className="text-[8px] font-black text-slate-400 uppercase tracking-tighter">{m.count}x</span>
+                                                                            <button onClick={() => setActiveDetailMerchant(m)} className="p-2 bg-slate-50 text-slate-400 hover:text-indigo-600 rounded-lg transition-colors border border-slate-100">
+                                                                                <Icon name="Activity" size={14}/>
+                                                                            </button>
+                                                                        </div>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                ))}
+                                            </div>
                                         </div>
                                     </div>
 
                                     {/* Right: Detailed Log Pane */}
-                                    <div className="w-64 bg-slate-900 rounded-[2.5rem] p-5 flex flex-col text-white shadow-xl border border-white/10 shrink-0">
+                                    <div className="w-80 bg-slate-900 rounded-[2rem] p-6 flex flex-col text-white shadow-xl border border-white/10 shrink-0">
                                         {activeDetailMerchant ? (
                                             <div className="flex flex-col h-full animate-in fade-in slide-in-from-right-2 duration-200">
-                                                <div className="flex items-center gap-2 mb-4 border-b border-white/10 pb-4">
-                                                    <Icon name="Calendar" className="text-indigo-400" />
+                                                <div className="flex items-center gap-3 mb-6 border-b border-white/10 pb-4">
+                                                    <div className="p-3 bg-indigo-500/20 rounded-xl text-indigo-400">
+                                                        <Icon name="Calendar" size={20} />
+                                                    </div>
                                                     <div className="overflow-hidden">
-                                                        <h4 className="font-black text-[10px] uppercase truncate w-32">{activeDetailMerchant.name}</h4>
-                                                        <p className="text-slate-500 text-[8px] font-bold uppercase tracking-widest">{activeDetailMerchant.count} Records</p>
+                                                        <h4 className="font-black text-sm uppercase truncate">{activeDetailMerchant.name}</h4>
+                                                        <p className="text-slate-500 text-[10px] font-bold uppercase tracking-widest">{activeDetailMerchant.count} Records</p>
                                                     </div>
                                                 </div>
-                                                <div className="flex-1 overflow-y-auto pr-1 custom-scrollbar space-y-2">
+                                                <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar space-y-2">
                                                     {[...activeDetailMerchant.transactions].sort((a,b)=>new Date(b.date)-new Date(a.date)).map((t, ti) => (
-                                                        <div key={ti} className="flex justify-between items-center py-2.5 px-3 rounded-xl bg-white/5 border border-white/5 hover:bg-white/10 transition-colors">
-                                                            <span className="text-[9px] text-slate-400 font-bold">{t.date}</span>
-                                                            <span className="text-[10px] font-black text-emerald-400">${t.amount.toLocaleString()}</span>
+                                                        <div key={ti} className="flex justify-between items-center py-3 px-4 rounded-xl bg-white/5 border border-white/5 hover:bg-white/10 transition-colors">
+                                                            <div className="flex flex-col overflow-hidden pr-3">
+                                                                {/* Shows Original Title here (falls back to merchant) */}
+                                                                <span className="text-[11px] text-slate-200 font-bold truncate" title={t.originalTitle}>
+                                                                    {t.originalTitle}
+                                                                </span>
+                                                                <span className="text-[9px] text-slate-400 font-bold mt-1">{t.date}</span>
+                                                            </div>
+                                                            <span className="text-[11px] font-black text-emerald-400 shrink-0">
+                                                                ${t.amount.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                                                            </span>
                                                         </div>
                                                     ))}
                                                 </div>
-                                                <div className="mt-4 pt-4 border-t border-white/10 flex items-center justify-between text-[9px] text-slate-400 font-bold uppercase tracking-widest">
+                                                <div className="mt-6 pt-4 border-t border-white/10 flex items-center justify-between text-[10px] text-slate-400 font-bold uppercase tracking-widest">
                                                     <span>Verified Total</span>
-                                                    <span className="text-white font-black text-xs">${activeDetailMerchant.value.toLocaleString()}</span>
+                                                    <span className="text-white font-black text-sm">${activeDetailMerchant.value.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
                                                 </div>
                                             </div>
                                         ) : (
                                             <div className="h-full flex flex-col items-center justify-center opacity-30 text-center">
-                                                <Icon name="List" size={40} className="mb-3 text-slate-600" />
-                                                <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 leading-relaxed">Select Activity icon<br/>for verified logs</p>
+                                                <Icon name="List" size={48} className="mb-4 text-slate-600" />
+                                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 leading-relaxed">Select Activity icon<br/>for verified logs</p>
                                             </div>
                                         )}
                                     </div>
