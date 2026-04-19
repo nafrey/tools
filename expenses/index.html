@@ -126,8 +126,9 @@
                             category: cols[2],
                             type: cols[3], 
                             amount: parseFloat(cols[4]),
-                            // Fallback to merchant if 6th column (Original Title) is missing
-                            originalTitle: cols[5] ? cols[5].replace(/^"|"$/g, '') : cols[1]
+                            account: cols[5] ? cols[5].replace(/^"|"$/g, '') : '',
+                            // Fallback to merchant if 7th column (Original Title) is missing
+                            originalTitle: cols[6] ? cols[6].replace(/^"|"$/g, '') : cols[1]
                         };
                     }).filter(t => !isNaN(t.amount) && t.category?.trim().toLowerCase() !== 'transfer');
                     
@@ -168,7 +169,8 @@
                         date: t.date, 
                         amount: absAmount, 
                         merchant: t.merchant, 
-                        originalTitle: t.originalTitle 
+                        originalTitle: t.originalTitle,
+                        account: t.account
                     });
 
                     const dateObj = new Date(t.date);
@@ -377,7 +379,7 @@
                                 <div className="absolute top-full right-0 mt-3 w-80 bg-slate-900 text-white p-6 rounded-[2rem] shadow-2xl z-[100] border border-white/10 animate-in fade-in zoom-in duration-200">
                                    <h4 className="text-[10px] font-black uppercase tracking-widest mb-3 text-indigo-400">Required CSV Schema</h4>
                                    <p className="text-[10px] text-slate-300 leading-relaxed font-bold">Upload a file with these headers:<br/>
-                                     <code className="text-emerald-400 block my-2 bg-white/5 p-2 rounded font-mono text-[9px]">Date, Merchant, Category, Type, Amount, Original Title</code>
+                                     <code className="text-emerald-400 block my-2 bg-white/5 p-2 rounded font-mono text-[9px]">Date, Merchant, Category, Type, Amount, Account, Original Title</code>
                                      <span className="text-slate-500 uppercase tracking-tighter">Valid Types:</span> Need, Want, Inflow
                                    </p>
                                    <div className="absolute bottom-full right-5 border-8 border-transparent border-b-slate-900"></div>
@@ -392,18 +394,31 @@
 
                     <main className="max-w-7xl mx-auto space-y-6">
                         {/* Metrics */}
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                            <div className="bg-white p-8 rounded-3xl shadow-sm border-t-4 border-t-indigo-500">
-                                <h3 className="text-slate-400 text-[10px] font-black uppercase tracking-widest italic">Net Balance</h3>
-                                <p className="text-4xl font-black mt-2 text-indigo-600">${(processedData.trendData[processedData.trendData.length-1]?.runningBalance || 0).toLocaleString()}</p>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div className="bg-white p-8 rounded-3xl shadow-sm border-t-4 border-t-emerald-500">
+                                <h3 className="text-slate-400 text-[10px] font-black uppercase tracking-widest text-emerald-600">Total Inflow</h3>
+                                <p className="text-4xl font-black mt-2 text-emerald-600">
+                                    ${(processedData.totals.income).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                                </p>
                             </div>
-                            <div className="bg-white p-8 rounded-3xl shadow-sm border-t-4 border-t-sky-500">
-                                <h3 className="text-slate-400 text-[10px] font-black uppercase tracking-widest text-sky-600">Total Needs</h3>
-                                <p className="text-4xl font-black mt-2 text-sky-600">${processedData.totals.needs.toLocaleString()}</p>
-                            </div>
-                            <div className="bg-white p-8 rounded-3xl shadow-sm border-t-4 border-t-rose-500">
-                                <h3 className="text-slate-400 text-[10px] font-black uppercase tracking-widest text-rose-600">Total Wants</h3>
-                                <p className="text-4xl font-black mt-2 text-rose-600">${processedData.totals.wants.toLocaleString()}</p>
+                            
+                            <div className="bg-white p-8 rounded-3xl shadow-sm border-t-4 border-t-rose-500 flex items-center justify-between">
+                                <div>
+                                    <h3 className="text-slate-400 text-[10px] font-black uppercase tracking-widest text-rose-600">Total Expenses</h3>
+                                    <p className="text-4xl font-black mt-2 text-rose-600">
+                                        ${(processedData.totals.needs + processedData.totals.wants).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                                    </p>
+                                </div>
+                                <div className="text-right flex flex-col gap-1.5 shrink-0">
+                                    <div className="bg-sky-50 px-3 py-1.5 rounded-lg border border-sky-100 flex items-center justify-between min-w-[140px]">
+                                        <span className="text-[9px] font-black text-sky-600 uppercase tracking-widest mr-3">Needs</span>
+                                        <span className="text-sm font-black text-sky-700">${processedData.totals.needs.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                                    </div>
+                                    <div className="bg-rose-50 px-3 py-1.5 rounded-lg border border-rose-100 flex items-center justify-between min-w-[140px]">
+                                        <span className="text-[9px] font-black text-rose-600 uppercase tracking-widest mr-3">Wants</span>
+                                        <span className="text-sm font-black text-rose-700">${processedData.totals.wants.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                                    </div>
+                                </div>
                             </div>
                         </div>
 
@@ -437,7 +452,7 @@
                                             <div className="space-y-4">
                                                 <div className="flex items-center gap-2 border-b-2 border-emerald-500/20 pb-2 font-black uppercase text-[11px] text-emerald-700"><Icon name="ArrowUpCircle" className="text-emerald-600" />Cash Inflow</div>
                                                 {processedData.categoryData.filter(c => c.group === 'Income').length === 0 && <p className="text-[10px] uppercase font-bold text-slate-400 pl-2">No income in this period</p>}
-                                                {processedData.categoryData.filter(c => c.group === 'Income').map(cat => (
+                                                {processedData.categoryData.filter(c => c.group === 'Income').sort((a, b) => b.value - a.value).map(cat => (
                                                     <div key={cat.id} className={`border-2 rounded-3xl transition-all duration-300 overflow-hidden ${selectedFilter?.id === cat.id ? 'border-emerald-500 bg-emerald-50/20' : 'border-slate-100 bg-slate-50'}`}>
                                                         <div className="flex items-stretch border-b border-slate-100/50 last:border-0">
                                                             <button 
@@ -476,7 +491,7 @@
                                             <div className="space-y-4">
                                                 <div className="flex items-center gap-2 border-b-2 border-rose-500/20 pb-2 font-black uppercase text-[11px] text-rose-700"><Icon name="ArrowDownCircle" className="text-rose-600" />Expenditure</div>
                                                 {processedData.categoryData.filter(c => c.group !== 'Income').length === 0 && <p className="text-[10px] uppercase font-bold text-slate-400 pl-2">No expenses in this period</p>}
-                                                {processedData.categoryData.filter(c => c.group !== 'Income').map(cat => (
+                                                {processedData.categoryData.filter(c => c.group !== 'Income').sort((a, b) => b.value - a.value).map(cat => (
                                                     <div key={cat.id} className={`border-2 rounded-3xl transition-all duration-300 overflow-hidden ${selectedFilter?.id === cat.id ? 'border-slate-900 bg-slate-50' : 'border-slate-100 bg-slate-50'}`}>
                                                         <div className="flex items-stretch border-b border-slate-100/50 last:border-0">
                                                             <button 
@@ -539,7 +554,10 @@
                                                                 <span className="text-[11px] text-slate-200 font-bold truncate" title={t.originalTitle}>
                                                                     {t.originalTitle}
                                                                 </span>
-                                                                <span className="text-[9px] text-slate-400 font-bold mt-1">{t.date}</span>
+                                                                <div className="flex items-center gap-2 mt-1">
+                                                                    <span className="text-[9px] text-slate-400 font-bold">{t.date}</span>
+                                                                    {t.account && <span className="text-[8px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded font-black uppercase tracking-wider">{t.account}</span>}
+                                                                </div>
                                                             </div>
                                                             <span className="text-[11px] font-black text-emerald-400 shrink-0">
                                                                 ${t.amount.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
