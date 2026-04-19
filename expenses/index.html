@@ -127,7 +127,6 @@
                             type: cols[3], 
                             amount: parseFloat(cols[4]),
                             account: cols[5] ? cols[5].replace(/^"|"$/g, '') : '',
-                            // Fallback to merchant if 7th column (Original Title) is missing
                             originalTitle: cols[6] ? cols[6].replace(/^"|"$/g, '') : cols[1]
                         };
                     }).filter(t => !isNaN(t.amount) && t.category?.trim().toLowerCase() !== 'transfer');
@@ -143,7 +142,6 @@
 
             const processedData = useMemo(() => {
                 const categories = {};
-                const monthlyGroups = {};
                 
                 filteredTransactions.forEach(t => {
                     const absAmount = Math.abs(t.amount);
@@ -172,42 +170,19 @@
                         originalTitle: t.originalTitle,
                         account: t.account
                     });
-
-                    const dateObj = new Date(t.date);
-                    if (!isNaN(dateObj)) {
-                        const monthKey = dateObj.toLocaleString('en-US', { month: 'short', year: '2-digit' });
-                        if (!monthlyGroups[monthKey]) {
-                            monthlyGroups[monthKey] = { month: monthKey, income: 0, spending: 0, catBreakdown: {}, sortDate: dateObj };
-                        }
-                        if (t.type === 'Inflow') {
-                            monthlyGroups[monthKey].income += t.amount;
-                        } else {
-                            monthlyGroups[monthKey].spending += absAmount;
-                            const catId = t.category.toLowerCase().replace(/\s+/g, '_');
-                            monthlyGroups[monthKey].catBreakdown[catId] = (monthlyGroups[monthKey].catBreakdown[catId] || 0) + absAmount;
-                        }
-                    }
                 });
 
                 const categoryArray = Object.values(categories).map(cat => ({
                     ...cat,
                     merchants: Object.values(cat.merchants).sort((a, b) => b.value - a.value)
                 }));
-                const monthlyArray = Object.values(monthlyGroups).sort((a, b) => a.sortDate - b.sortDate);
-                let balance = 0; 
-                const trendData = monthlyArray.map(m => {
-                    balance += (m.income - m.spending);
-                    return { ...m, runningBalance: balance };
-                });
 
                 return { 
                     categoryData: categoryArray, 
-                    trendData, 
                     totals: { 
                         needs: categoryArray.filter(c => c.group === 'Needs').reduce((acc, curr) => acc + curr.value, 0),
                         wants: categoryArray.filter(c => c.group === 'Wants').reduce((acc, curr) => acc + curr.value, 0),
-                        income: filteredTransactions.filter(t => t.type === 'Inflow').reduce((acc, curr) => acc + curr.amount, 0),
-                        surplus: filteredTransactions.filter(t => t.type === 'Inflow').reduce((acc, curr) => acc + curr.amount, 0) - categoryArray.filter(c => c.group !== 'Income').reduce((acc, curr) => acc + curr.value, 0)
+                        income: filteredTransactions.filter(t => t.type === 'Inflow').reduce((acc, curr) => acc + curr.amount, 0)
                     }
                 };
             }, [filteredTransactions]);
@@ -219,12 +194,18 @@
 
             const toggleCategory = (id) => setExpandedCategories(prev => ({ ...prev, [id]: !prev[id] }));
 
-            // --- Sankey Stacking Implementation ---
+            // --- Mathematically Balanced Sankey Stacking Implementation ---
             const renderSankey = () => {
                 const width = 1000;
                 const padding = 40;
                 const nodeWidth = 15;
                 const colGap = (width - padding * 2) / 4;
+
+                const income = processedData.totals.income;
+                const expenses = processedData.totals.needs + processedData.totals.wants;
+                const totalFlow = Math.max(income, expenses);
+                const surplus = Math.max(0, income - expenses);
+                const deficit = Math.max(0, expenses - income);
 
                 const sortedBuckets = [...processedData.categoryData]
                     .filter(c => c.group !== 'Income')
@@ -240,24 +221,45 @@
                         color: c.group === 'Needs' ? '#0ea5e9' : '#f43f5e' 
                     }));
 
+                // Append a "Savings Bucket" to balance the tail end of the flow if surplus exists
+                if (surplus > 0) {
+                    sortedBuckets.push({
+                        id: 'surplus_bucket',
+                        name: 'Net Savings',
+                        value: surplus,
+                        group: 'Surplus',
+                        color: '#94a3b8'
+                    });
+                }
+
+                const c0_nodes = [{ id: 'inflows', name: 'Income', value: income, color: '#10b981', group: 'Income' }];
+                if (deficit > 0) {
+                    c0_nodes.push({ id: 'deficit', name: 'Deficit (Overspend)', value: deficit, color: '#f59e0b', group: 'Deficit' });
+                }
+
+                const c2_nodes = [
+                    { id: 'needs_node', name: 'Needs', value: processedData.totals.needs, color: '#0ea5e9', group: 'Needs' },
+                    { id: 'wants_node', name: 'Wants', value: processedData.totals.wants, color: '#f43f5e', group: 'Wants' }
+                ];
+                if (surplus > 0) {
+                    c2_nodes.push({ id: 'surplus_node', name: 'Savings', value: surplus, color: '#94a3b8', group: 'Surplus' });
+                }
+
                 const columns = [
-                    { id: 'c0', label: 'Cash Inflow', nodes: [{ id: 'inflows', name: 'Inflows', value: processedData.totals.income, color: '#10b981', group: 'Income' }] },
-                    { id: 'c1', label: 'Activity Vol', nodes: [{ id: 'gross', name: 'Gross Activity', value: processedData.totals.income, color: '#0f172a', group: 'Gross' }] },
-                    { id: 'c2', label: 'Classification', nodes: [
-                        { id: 'needs_node', name: 'Needs', value: processedData.totals.needs, color: '#0ea5e9', group: 'Needs' },
-                        { id: 'wants_node', name: 'Wants', value: processedData.totals.wants, color: '#f43f5e', group: 'Wants' },
-                        { id: 'surplus_node', name: 'Savings', value: Math.max(0, processedData.totals.surplus), color: '#94a3b8', group: 'Surplus' }
-                    ]},
+                    { id: 'c0', label: 'Funding', nodes: c0_nodes },
+                    { id: 'c1', label: 'Total Volume', nodes: [{ id: 'gross', name: 'Gross Activity', value: totalFlow, color: '#0f172a', group: 'Gross' }] },
+                    { id: 'c2', label: 'Classification', nodes: c2_nodes },
                     { id: 'c3', label: 'Buckets', nodes: sortedBuckets }
                 ];
 
                 const nodesWithPos = [];
-                const scale = 300 / (processedData.totals.income || 1);
+                const scale = 300 / (totalFlow || 1);
                 
                 let maxColHeight = 400; 
                 const exitY = {}; 
                 const entryY = {};
 
+                // Calculate visual offsets to perfectly contain all sub-flows
                 columns.forEach((col, colIdx) => {
                     let currentY = 50;
                     col.nodes.forEach((node) => {
@@ -278,12 +280,13 @@
                     }
                 });
 
-                const drawLink = (fromId, toId, color, isActive) => {
+                // Flow size is explicitly driven by passed value, not implicitly by targets
+                const drawLink = (fromId, toId, flowValue, color, isActive) => {
                     const fromNode = nodesWithPos.find(n => n.id === fromId);
                     const toNode = nodesWithPos.find(n => n.id === toId);
-                    if (!fromNode || !toNode) return null;
+                    if (!fromNode || !toNode || flowValue <= 0) return null;
 
-                    const flowWidth = Math.max(toNode.exactH, 1); 
+                    const flowWidth = Math.max(flowValue * scale, 1); 
                     const startX = fromNode.x + fromNode.w;
                     const startY = exitY[fromId] + (flowWidth / 2);
                     const endX = toNode.x;
@@ -309,13 +312,23 @@
                 };
 
                 const links = [];
-                links.push(drawLink('inflows', 'gross', '#10b981', true));
+                // C0 -> C1
+                links.push(drawLink('inflows', 'gross', income, '#10b981', true));
+                if (deficit > 0) {
+                    links.push(drawLink('deficit', 'gross', deficit, '#f59e0b', true));
+                }
+
+                // C1 -> C2
                 nodesWithPos.filter(n => n.colIdx === 2).forEach(target => {
-                    links.push(drawLink('gross', target.id, target.color, !selectedFilter || selectedFilter.typeName === target.group || target.group === 'Surplus'));
+                    links.push(drawLink('gross', target.id, target.value, target.color, !selectedFilter || selectedFilter.typeName === target.group || target.group === 'Surplus'));
                 });
+
+                // C2 -> C3
                 nodesWithPos.filter(n => n.colIdx === 3).forEach(target => {
-                    const parentId = target.group === 'Needs' ? 'needs_node' : 'wants_node';
-                    links.push(drawLink(parentId, target.id, target.color, !selectedFilter || selectedFilter.id === target.id));
+                    let parentId = 'needs_node';
+                    if (target.group === 'Wants') parentId = 'wants_node';
+                    if (target.group === 'Surplus') parentId = 'surplus_node';
+                    links.push(drawLink(parentId, target.id, target.value, target.color, !selectedFilter || selectedFilter.id === target.id));
                 });
 
                 return (
@@ -325,7 +338,7 @@
                         ))}
                         <g>{links}</g>
                         {nodesWithPos.map(node => {
-                            const active = node.colIdx < 2 || (selectedFilter ? (selectedFilter.id === node.id || selectedFilter.typeName === node.group || node.group === 'Surplus') : true);
+                            const active = node.colIdx < 2 || (selectedFilter ? (selectedFilter.id === node.id || selectedFilter.typeName === node.group || node.group === 'Surplus' || node.group === 'Deficit') : true);
                             return (
                                 <g key={node.id} opacity={active ? 1 : 0.15} style={{transition: 'opacity 0.3s'}}>
                                     <rect x={node.x} y={node.y} width={node.w} height={node.h} rx={2} fill={node.color} />
@@ -550,7 +563,6 @@
                                                     {[...activeDetailMerchant.transactions].sort((a,b)=>new Date(b.date)-new Date(a.date)).map((t, ti) => (
                                                         <div key={ti} className="flex justify-between items-center py-3 px-4 rounded-xl bg-white/5 border border-white/5 hover:bg-white/10 transition-colors">
                                                             <div className="flex flex-col overflow-hidden pr-3">
-                                                                {/* Shows Original Title here (falls back to merchant) */}
                                                                 <span className="text-[11px] text-slate-200 font-bold truncate" title={t.originalTitle}>
                                                                     {t.originalTitle}
                                                                 </span>
