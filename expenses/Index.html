@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Financial Audit Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <!-- PropTypes MUST be available before Recharts runs -->
+    <script src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js"></script>
+    <script>window.PropTypes = window.PropTypes || window['prop-types'];</script>
+    <!-- Use a stable version of Recharts to prevent UMD dependency issues -->
+    <script src="https://unpkg.com/recharts@2.1.9/umd/Recharts.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        .custom-scrollbar-dark::-webkit-scrollbar-thumb { background: #475569; }
+        .sankey-flow { transition: all 0.6s ease-in-out; }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-900">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useMemo, useRef, useEffect } = React;
+        const { 
+            AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip: RechartsTooltip, ResponsiveContainer 
+        } = Recharts;
+
+        // --- Robust Lucide Icon Renderer ---
+        const Icon = ({ name, size = 16, className = "" }) => {
+            const ref = useRef(null);
+            useEffect(() => {
+                if (ref.current && window.lucide) {
+                    // Create an i tag and let Lucide replace it specifically within this ref scope
+                    ref.current.innerHTML = `<i data-lucide="${name}" class="${className}"></i>`;
+                    window.lucide.createIcons({
+                        root: ref.current,
+                        attrs: {
+                            width: size,
+                            height: size,
+                        }
+                    });
+                }
+            }, [name, size, className]);
+            return <span className="inline-flex items-center justify-center shrink-0" ref={ref}></span>;
+        };
+
+        const App = () => {
+            const [transactions, setTransactions] = useState([]);
+            const [selectedFilter, setSelectedFilter] = useState(null);
+            const [expandedCategories, setExpandedCategories] = useState({});
+            const [activeDetailMerchant, setActiveDetailMerchant] = useState(null);
+            const [showImportHint, setShowImportHint] = useState(false);
+            const fileInputRef = useRef(null);
+
+            const getCategoryIconName = (categoryName) => {
+                const name = categoryName.toLowerCase();
+                if (name.includes('house') || name.includes('housing')) return "Home";
+                if (name.includes('utilit') || name.includes('hydro') || name.includes('gas')) return "Zap";
+                if (name.includes('insur')) return "ShieldCheck";
+                if (name.includes('groc')) return "ShoppingCart";
+                if (name.includes('din') || name.includes('eat') || name.includes('restaur')) return "UtensilsCrossed";
+                if (name.includes('coff')) return "Coffee";
+                if (name.includes('retail') || name.includes('shop') || name.includes('buy')) return "ShoppingBag";
+                if (name.includes('travel') || name.includes('flight') || name.includes('hotel')) return "Plane";
+                if (name.includes('income') || name.includes('salary')) return "Banknote";
+                return "Tag";
+            };
+
+            const DATE_RANGE = useMemo(() => {
+                if (transactions.length === 0) return "Awaiting CSV Data";
+                const dates = transactions.map(t => new Date(t.date)).filter(d => !isNaN(d));
+                if (dates.length === 0) return "No Valid Dates";
+                const start = new Date(Math.min(...dates)).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+                const end = new Date(Math.max(...dates)).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+                return `${start} – ${end}`;
+            }, [transactions]);
+
+            const handleFileUpload = (event) => {
+                const file = event.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const text = e.target.result;
+                    const rows = text.split('\n').filter(row => row.trim() !== '');
+                    const parsed = rows.slice(1).map(row => {
+                        const columns = row.split(',').map(c => c.trim());
+                        return {
+                            date: columns[0],
+                            merchant: columns[1],
+                            category: columns[2],
+                            type: columns[3], 
+                            amount: parseFloat(columns[4])
+                        };
+                    }).filter(t => !isNaN(t.amount));
+                    setTransactions(parsed);
+                    setSelectedFilter(null);
+                    setActiveDetailMerchant(null);
+                    if (fileInputRef.current) fileInputRef.current.value = '';
+                };
+                reader.readAsText(file);
+            };
+
+            const processedData = useMemo(() => {
+                const categories = {};
+                const monthlyGroups = {};
+                
+                transactions.forEach(t => {
+                    const absAmount = Math.abs(t.amount);
+                    if (!categories[t.category]) {
+                        categories[t.category] = { 
+                            id: t.category.toLowerCase().replace(/\s+/g, '_'),
+                            name: t.category, 
+                            value: 0, 
+                            group: t.type === 'Inflow' ? 'Income' : (t.type === 'Need' ? 'Needs' : 'Wants'),
+                            merchants: {}
+                        };
+                    }
+                    categories[t.category].value += absAmount;
+                    
+                    if (!categories[t.category].merchants[t.merchant]) {
+                        categories[t.category].merchants[t.merchant] = { 
+                            name: t.merchant, value: 0, count: 0, transactions: [] 
+                        };
+                    }
+                    categories[t.category].merchants[t.merchant].value += absAmount;
+                    categories[t.category].merchants[t.merchant].count += 1;
+                    categories[t.category].merchants[t.merchant].transactions.push({ date: t.date, amount: absAmount });
+
+                    const dateObj = new Date(t.date);
+                    if (!isNaN(dateObj)) {
+                        const monthKey = dateObj.toLocaleString('en-US', { month: 'short', year: '2-digit' });
+                        if (!monthlyGroups[monthKey]) {
+                            monthlyGroups[monthKey] = { month: monthKey, income: 0, spending: 0, catBreakdown: {}, sortDate: dateObj };
+                        }
+                        if (t.type === 'Inflow') {
+                            monthlyGroups[monthKey].income += t.amount;
+                        } else {
+                            monthlyGroups[monthKey].spending += absAmount;
+                            const catId = t.category.toLowerCase().replace(/\s+/g, '_');
+                            monthlyGroups[monthKey].catBreakdown[catId] = (monthlyGroups[monthKey].catBreakdown[catId] || 0) + absAmount;
+                        }
+                    }
+                });
+
+                const categoryArray = Object.values(categories).map(cat => ({
+                    ...cat,
+                    merchants: Object.values(cat.merchants).sort((a, b) => b.value - a.value)
+                }));
+                const monthlyArray = Object.values(monthlyGroups).sort((a, b) => a.sortDate - b.sortDate);
+                let balance = 0; 
+                const trendData = monthlyArray.map(m => {
+                    balance += (m.income - m.spending);
+                    return { ...m, runningBalance: balance };
+                });
+
+                return { 
+                    categoryData: categoryArray, 
+                    trendData, 
+                    totals: { 
+                        needs: categoryArray.filter(c => c.group === 'Needs').reduce((acc, curr) => acc + curr.value, 0),
+                        wants: categoryArray.filter(c => c.group === 'Wants').reduce((acc, curr) => acc + curr.value, 0),
+                        income: transactions.filter(t => t.type === 'Inflow').reduce((acc, curr) => acc + curr.amount, 0),
+                        surplus: transactions.filter(t => t.type === 'Inflow').reduce((acc, curr) => acc + curr.amount, 0) - categoryArray.filter(c => c.group !== 'Income').reduce((acc, curr) => acc + curr.value, 0)
+                    }
+                };
+            }, [transactions]);
+
+            const chartDisplayData = useMemo(() => {
+                if (!selectedFilter) return processedData.trendData;
+                let cumulativeFocus = 0;
+                return processedData.trendData.map(d => {
+                    const val = selectedFilter.type === 'category' ? (d.catBreakdown[selectedFilter.id] || 0) : (d.spending * 0.05);
+                    cumulativeFocus += val;
+                    return { ...d, cumulativeFocus };
+                });
+            }, [selectedFilter, processedData]);
+
+            const handleSelectFilter = (type, item, color) => {
+                if (selectedFilter?.name === item.name) setSelectedFilter(null);
+                else setSelectedFilter({ type, id: item.id || item.name, name: item.name, color, typeName: item.group });
+            };
+
+            const toggleCategory = (id) => setExpandedCategories(prev => ({ ...prev, [id]: !prev[id] }));
+
+            // --- Sankey Stacking Implementation ---
+            const renderSankey = () => {
+                const width = 1000;
+                const padding = 40;
+                const nodeWidth = 15;
+                const colGap = (width - padding * 2) / 4;
+
+                const sortedBuckets = [...processedData.categoryData]
+                    .filter(c => c.group !== 'Income')
+                    .sort((a, b) => {
+                        if (a.group !== b.group) return a.group === 'Needs' ? -1 : 1;
+                        return b.value - a.value;
+                    })
+                    .map(c => ({ 
+                        id: c.id, 
+                        name: c.name, 
+                        value: c.value, 
+                        group: c.group, 
+                        color: c.group === 'Needs' ? '#0ea5e9' : '#f43f5e' 
+                    }));
+
+                const columns = [
+                    { id: 'c0', label: 'Cash Inflow', nodes: [{ id: 'inflows', name: 'Inflows', value: processedData.totals.income, color: '#10b981', group: 'Income' }] },
+                    { id: 'c1', label: 'Activity Vol', nodes: [{ id: 'gross', name: 'Gross Activity', value: processedData.totals.income, color: '#0f172a', group: 'Gross' }] },
+                    { id: 'c2', label: 'Classification', nodes: [
+                        { id: 'needs_node', name: 'Needs', value: processedData.totals.needs, color: '#0ea5e9', group: 'Needs' },
+                        { id: 'wants_node', name: 'Wants', value: processedData.totals.wants, color: '#f43f5e', group: 'Wants' },
+                        { id: 'surplus_node', name: 'Savings', value: Math.max(0, processedData.totals.surplus), color: '#94a3b8', group: 'Surplus' }
+                    ]},
+                    { id: 'c3', label: 'Buckets', nodes: sortedBuckets }
+                ];
+
+                const nodesWithPos = [];
+                const scale = 300 / (processedData.totals.income || 1);
+                
+                let maxColHeight = 400; 
+                const exitY = {}; 
+                const entryY = {};
+
+                columns.forEach((col, colIdx) => {
+                    let currentY = 50;
+                    col.nodes.forEach((node) => {
+                        const exactHeight = node.value * scale;
+                        const visualHeight = Math.max(exactHeight, 12); 
+                        
+                        const nodeData = { ...node, x: padding + colIdx * colGap, y: currentY, w: nodeWidth, h: visualHeight, exactH: exactHeight, colIdx };
+                        nodesWithPos.push(nodeData);
+                        
+                        const verticalOffset = (visualHeight - exactHeight) / 2;
+                        exitY[nodeData.id] = currentY + verticalOffset;
+                        entryY[nodeData.id] = currentY + verticalOffset;
+                        
+                        currentY += visualHeight + 25; 
+                    });
+                    if (currentY + 50 > maxColHeight) {
+                        maxColHeight = currentY + 50;
+                    }
+                });
+
+                const drawLink = (fromId, toId, color, isActive) => {
+                    const fromNode = nodesWithPos.find(n => n.id === fromId);
+                    const toNode = nodesWithPos.find(n => n.id === toId);
+                    if (!fromNode || !toNode) return null;
+
+                    const flowWidth = Math.max(toNode.exactH, 1); 
+                    const startX = fromNode.x + fromNode.w;
+                    const startY = exitY[fromId] + (flowWidth / 2);
+                    const endX = toNode.x;
+                    const endY = entryY[toId] + (flowWidth / 2);
+
+                    exitY[fromId] += flowWidth;
+                    entryY[toId] += flowWidth;
+
+                    const ctrlX = startX + (endX - startX) / 2;
+                    const d = `M ${startX} ${startY} C ${ctrlX} ${startY}, ${ctrlX} ${endY}, ${endX} ${endY}`;
+                    
+                    return (
+                        <path 
+                            key={`${fromId}-${toId}`}
+                            d={d}
+                            fill="none"
+                            stroke={color}
+                            strokeWidth={flowWidth}
+                            strokeOpacity={isActive ? 0.35 : 0.05}
+                            className="sankey-flow"
+                        />
+                    );
+                };
+
+                const links = [];
+                links.push(drawLink('inflows', 'gross', '#10b981', true));
+                nodesWithPos.filter(n => n.colIdx === 2).forEach(target => {
+                    links.push(drawLink('gross', target.id, target.color, !selectedFilter || selectedFilter.typeName === target.group || target.group === 'Surplus'));
+                });
+                nodesWithPos.filter(n => n.colIdx === 3).forEach(target => {
+                    const parentId = target.group === 'Needs' ? 'needs_node' : 'wants_node';
+                    links.push(drawLink(parentId, target.id, target.color, !selectedFilter || selectedFilter.id === target.id));
+                });
+
+                return (
+                    <svg viewBox={`0 0 ${width} ${maxColHeight}`} className="w-full h-auto min-h-[300px]">
+                        {columns.map((col, i) => (
+                            <text key={col.id} x={padding + i * colGap} y={25} className="text-[10px] font-black fill-slate-400 uppercase tracking-widest">{col.label}</text>
+                        ))}
+                        <g>{links}</g>
+                        {nodesWithPos.map(node => {
+                            const active = node.colIdx < 2 || (selectedFilter ? (selectedFilter.id === node.id || selectedFilter.typeName === node.group || node.group === 'Surplus') : true);
+                            return (
+                                <g key={node.id} opacity={active ? 1 : 0.15} style={{transition: 'opacity 0.3s'}}>
+                                    <rect x={node.x} y={node.y} width={node.w} height={node.h} rx={2} fill={node.color} />
+                                    <text x={node.x + node.w + 6} y={node.y + node.h/2 + 4} className="text-[10px] font-black fill-slate-700">{node.name}</text>
+                                    <text x={node.x + node.w + 6} y={node.y + node.h/2 + 16} className="text-[9px] fill-slate-400 font-bold">${node.value.toLocaleString()}</text>
+                                </g>
+                            );
+                        })}
+                    </svg>
+                );
+            };
+
+            return (
+                <div className="min-h-screen p-4 md:p-8 bg-slate-50">
+                    <header className="max-w-7xl mx-auto mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                        <div>
+                            <h1 className="text-3xl font-black tracking-tight uppercase text-slate-800">Financial Audit Flow</h1>
+                            <div className="flex items-center gap-2 text-slate-500 bg-white px-3 py-1.5 rounded-full border border-slate-200 shadow-sm w-fit mt-2">
+                                <Icon name="Calendar" className="text-blue-500" />
+                                <p className="text-xs font-black uppercase tracking-widest">{DATE_RANGE}</p>
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-3 relative">
+                            <div onMouseEnter={() => setShowImportHint(true)} onMouseLeave={() => setShowImportHint(false)} className="p-2.5 bg-slate-200 text-slate-600 rounded-full cursor-help hover:bg-slate-300 transition-all"><Icon name="Info" size={20} /></div>
+                            {showImportHint && (
+                                <div className="absolute top-full right-0 mt-3 w-80 bg-slate-900 text-white p-6 rounded-[2rem] shadow-2xl z-[100] border border-white/10 animate-in fade-in zoom-in duration-200">
+                                   <h4 className="text-[10px] font-black uppercase tracking-widest mb-3 text-indigo-400">Required CSV Schema</h4>
+                                   <p className="text-[10px] text-slate-300 leading-relaxed font-bold">Upload a file with these headers:<br/>
+                                     <code className="text-emerald-400 block my-2 bg-white/5 p-2 rounded font-mono text-[9px]">Date, Merchant, Category, Type, Amount</code>
+                                     <span className="text-slate-500 uppercase tracking-tighter">Valid Types:</span> Need, Want, Inflow
+                                   </p>
+                                   <div className="absolute bottom-full right-5 border-8 border-transparent border-b-slate-900"></div>
+                                </div>
+                            )}
+                            <label className="flex items-center gap-2 px-7 py-3 bg-indigo-600 text-white rounded-full shadow-lg hover:bg-indigo-700 transition-all cursor-pointer text-sm font-black uppercase tracking-wider">
+                                <Icon name="Upload" />Import CSV
+                                <input ref={fileInputRef} type="file" accept=".csv" className="hidden" onChange={handleFileUpload} />
+                            </label>
+                        </div>
+                    </header>
+
+                    <main className="max-w-7xl mx-auto space-y-6">
+                        {/* Metrics */}
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                            <div className="bg-white p-8 rounded-3xl shadow-sm border-t-4 border-t-indigo-500">
+                                <h3 className="text-slate-400 text-[10px] font-black uppercase tracking-widest italic">Net Balance</h3>
+                                <p className="text-4xl font-black mt-2 text-indigo-600">${(processedData.trendData[processedData.trendData.length-1]?.runningBalance || 0).toLocaleString()}</p>
+                            </div>
+                            <div className="bg-white p-8 rounded-3xl shadow-sm border-t-4 border-t-sky-500">
+                                <h3 className="text-slate-400 text-[10px] font-black uppercase tracking-widest text-sky-600">Total Needs</h3>
+                                <p className="text-4xl font-black mt-2 text-sky-600">${processedData.totals.needs.toLocaleString()}</p>
+                            </div>
+                            <div className="bg-white p-8 rounded-3xl shadow-sm border-t-4 border-t-rose-500">
+                                <h3 className="text-slate-400 text-[10px] font-black uppercase tracking-widest text-rose-600">Total Wants</h3>
+                                <p className="text-4xl font-black mt-2 text-rose-600">${processedData.totals.wants.toLocaleString()}</p>
+                            </div>
+                        </div>
+
+                        {/* Sankey */}
+                        <div className="bg-white p-10 rounded-[2.5rem] shadow-xl overflow-hidden border border-slate-100 relative">
+                            <div className="flex items-center gap-3 mb-10"><Icon name="Share2" size={24} className="text-indigo-600" /><h3 className="font-black text-xl uppercase tracking-tighter italic text-slate-800">Flow Synthesis</h3></div>
+                            {transactions.length > 0 ? (
+                                <div className="py-4 overflow-x-auto">
+                                    <div className="min-w-[900px]">
+                                        {renderSankey()}
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="h-64 flex flex-col items-center justify-center text-slate-200 italic font-black uppercase tracking-widest">
+                                    <Icon name="Database" size={64} className="opacity-10 mb-4" />
+                                    Awaiting CSV Data
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Trend and Drill-down */}
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pb-12">
+                            <div className="bg-white p-8 rounded-[2.5rem] shadow-sm flex flex-col h-[42rem] border border-slate-100">
+                                <h3 className="font-black text-lg uppercase tracking-tighter mb-6 flex items-center gap-2"><Icon name="Focus" className="text-blue-600" />Net Position Trend</h3>
+                                {transactions.length > 0 ? (
+                                    <div className="flex-1">
+                                        <ResponsiveContainer width="100%" height="100%">
+                                            <AreaChart data={chartDisplayData}>
+                                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                                                <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 11}} dy={10} />
+                                                <YAxis axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 11}} />
+                                                <RechartsTooltip formatter={(v) => `$${Number(v).toFixed(0).toLocaleString()}`} contentStyle={{borderRadius: '20px', border: 'none', boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)'}} />
+                                                <Area type="monotone" dataKey="runningBalance" stroke="#6366f1" strokeWidth={4} fillOpacity={0.05} fill="#6366f1" />
+                                                {selectedFilter && <Area type="monotone" dataKey="cumulativeFocus" stroke={selectedFilter.color} strokeWidth={3} fillOpacity={0.15} fill={selectedFilter.color} strokeDasharray="5 5" />}
+                                            </AreaChart>
+                                        </ResponsiveContainer>
+                                    </div>
+                                ) : (
+                                    <div className="flex-1 flex flex-col items-center justify-center text-slate-300 italic py-20">
+                                        <p className="text-sm font-bold uppercase tracking-widest text-center">Import data to view trend</p>
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="bg-white p-8 rounded-[2.5rem] shadow-sm flex flex-col h-[42rem] border border-slate-100">
+                                <h3 className="font-black text-lg uppercase tracking-tighter text-slate-800 mb-6 italic underline decoration-indigo-500 underline-offset-8 decoration-4">Income & Expenses</h3>
+                                <div className="flex flex-1 gap-4 overflow-hidden">
+                                    <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar space-y-12">
+                                        {/* Income Section */}
+                                        <div className="space-y-4">
+                                            <div className="flex items-center gap-2 border-b-2 border-emerald-500/20 pb-2 font-black uppercase text-[11px] text-emerald-700"><Icon name="ArrowUpCircle" className="text-emerald-600" />Cash Inflow</div>
+                                            {processedData.categoryData.filter(c => c.group === 'Income').map(cat => (
+                                                <div key={cat.id} className={`border-2 rounded-3xl transition-all duration-300 overflow-hidden ${selectedFilter?.id === cat.id ? 'border-emerald-500 bg-emerald-50/20' : 'border-slate-100 bg-slate-50'}`}>
+                                                    <div className="flex items-stretch border-b border-slate-100/50 last:border-0">
+                                                        <button 
+                                                            onClick={() => handleSelectFilter('category', cat, '#10b981')} 
+                                                            className="p-4 flex-1 flex items-center gap-3 text-left hover:bg-emerald-50 transition-colors"
+                                                        >
+                                                            <Icon name={getCategoryIconName(cat.name)} className="text-emerald-500" />
+                                                            <span className="font-black text-slate-700 text-[11px] truncate">{cat.name}</span>
+                                                            <span className="text-[11px] font-black text-emerald-600 ml-auto">${cat.value.toLocaleString()}</span>
+                                                        </button>
+                                                        <button 
+                                                            onClick={() => toggleCategory(cat.id)} 
+                                                            className="px-5 border-l border-slate-100 text-slate-400 hover:bg-emerald-50 transition-colors flex items-center justify-center"
+                                                        >
+                                                            <Icon name={expandedCategories[cat.id] ? "ChevronUp" : "ChevronDown"} />
+                                                        </button>
+                                                    </div>
+                                                    {expandedCategories[cat.id] && (
+                                                        <div className="px-4 pb-4 space-y-2 pt-2 border-t border-slate-100">
+                                                            {cat.merchants.map((m, idx) => (
+                                                                <div key={idx} className="flex items-center justify-between bg-white rounded-xl p-3 shadow-sm border border-emerald-100">
+                                                                    <div className="flex-1 truncate text-[10px] font-black text-slate-700 pr-2">
+                                                                        {m.name}<br/>
+                                                                        <span className="text-emerald-600 font-black">${m.value.toLocaleString()}</span>
+                                                                    </div>
+                                                                    <button onClick={() => setActiveDetailMerchant(m)} className="p-2 bg-emerald-50 text-emerald-600 rounded-lg hover:bg-emerald-600 hover:text-white transition-all"><Icon name="Activity" size={14}/></button>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
+
+                                        {/* Expenses Section */}
+                                        <div className="space-y-4">
+                                            <div className="flex items-center gap-2 border-b-2 border-rose-500/20 pb-2 font-black uppercase text-[11px] text-rose-700"><Icon name="ArrowDownCircle" className="text-rose-600" />Expenditure</div>
+                                            {processedData.categoryData.filter(c => c.group !== 'Income').map(cat => (
+                                                <div key={cat.id} className={`border-2 rounded-3xl transition-all duration-300 overflow-hidden ${selectedFilter?.id === cat.id ? 'border-slate-900 bg-slate-50' : 'border-slate-100 bg-slate-50'}`}>
+                                                    <div className="flex items-stretch border-b border-slate-100/50 last:border-0">
+                                                        <button 
+                                                            onClick={() => handleSelectFilter('category', cat, cat.group === 'Needs' ? '#0ea5e9' : '#f43f5e')} 
+                                                            className="flex items-center gap-3 p-4 flex-1 text-left hover:text-indigo-600 hover:bg-slate-100 transition-colors"
+                                                        >
+                                                            <Icon name={getCategoryIconName(cat.name)} className={cat.group === 'Needs' ? 'text-sky-500' : 'text-rose-500'} />
+                                                            <span className="font-black text-slate-700 text-[11px] truncate">{cat.name}</span>
+                                                            <span className="text-[11px] font-black text-slate-900 ml-auto">${cat.value.toLocaleString()}</span>
+                                                        </button>
+                                                        <button 
+                                                            onClick={() => toggleCategory(cat.id)} 
+                                                            className="px-5 border-l border-slate-200 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors flex items-center justify-center"
+                                                        >
+                                                            <Icon name={expandedCategories[cat.id] ? "ChevronUp" : "ChevronDown"} />
+                                                        </button>
+                                                    </div>
+                                                    {expandedCategories[cat.id] && (
+                                                        <div className="px-4 pb-4 space-y-2 pt-2 border-t border-slate-200/50">
+                                                            {cat.merchants.map((m, idx) => (
+                                                                <div key={idx} className="flex items-center justify-between bg-white rounded-xl p-3 shadow-sm border border-slate-100">
+                                                                    <div className="flex-1 truncate text-[10px] font-black text-slate-700 pr-2">
+                                                                        {m.name}<br/>
+                                                                        <span className="text-rose-600">${m.value.toLocaleString()}</span>
+                                                                    </div>
+                                                                    <div className="flex items-center gap-2">
+                                                                        <span className="text-[8px] font-black text-slate-400 uppercase tracking-tighter">{m.count}x</span>
+                                                                        <button onClick={() => setActiveDetailMerchant(m)} className="p-2 bg-slate-50 text-slate-400 hover:text-indigo-600 rounded-lg transition-colors border border-slate-100">
+                                                                            <Icon name="Activity" size={14}/>
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    {/* Right: Detailed Log Pane */}
+                                    <div className="w-64 bg-slate-900 rounded-[2.5rem] p-5 flex flex-col text-white shadow-xl border border-white/10 shrink-0">
+                                        {activeDetailMerchant ? (
+                                            <div className="flex flex-col h-full animate-in fade-in slide-in-from-right-2 duration-200">
+                                                <div className="flex items-center gap-2 mb-4 border-b border-white/10 pb-4">
+                                                    <Icon name="Calendar" className="text-indigo-400" />
+                                                    <div className="overflow-hidden">
+                                                        <h4 className="font-black text-[10px] uppercase truncate w-32">{activeDetailMerchant.name}</h4>
+                                                        <p className="text-slate-500 text-[8px] font-bold uppercase tracking-widest">{activeDetailMerchant.count} Records</p>
+                                                    </div>
+                                                </div>
+                                                <div className="flex-1 overflow-y-auto pr-1 custom-scrollbar space-y-2">
+                                                    {[...activeDetailMerchant.transactions].sort((a,b)=>new Date(b.date)-new Date(a.date)).map((t, ti) => (
+                                                        <div key={ti} className="flex justify-between items-center py-2.5 px-3 rounded-xl bg-white/5 border border-white/5 hover:bg-white/10 transition-colors">
+                                                            <span className="text-[9px] text-slate-400 font-bold">{t.date}</span>
+                                                            <span className="text-[10px] font-black text-emerald-400">${t.amount.toLocaleString()}</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                                <div className="mt-4 pt-4 border-t border-white/10 flex items-center justify-between text-[9px] text-slate-400 font-bold uppercase tracking-widest">
+                                                    <span>Verified Total</span>
+                                                    <span className="text-white font-black text-xs">${activeDetailMerchant.value.toLocaleString()}</span>
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <div className="h-full flex flex-col items-center justify-center opacity-30 text-center">
+                                                <Icon name="List" size={40} className="mb-3 text-slate-600" />
+                                                <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 leading-relaxed">Select Activity icon<br/>for verified logs</p>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </main>
+                    <footer className="max-w-7xl mx-auto mt-12 pb-12 text-center text-slate-400 text-[10px] font-black uppercase tracking-[0.4em] opacity-60">
+                        Full Audit Blueprint • Live Data Processor Active
+                    </footer>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
